@@ -611,16 +611,22 @@ mod tests {
     #[test]
     fn free_overline_wins() {
         let (g, mut state) = game();
-        // Fill six horizontally for black. White plays on rank 2.
-        let files = ["a", "b", "c", "d", "e", "f"];
-        for (i, f) in files.iter().enumerate() {
-            play(&g, &mut state, 0, &format!("{f}1"));
-            if i < 5 {
-                play(&g, &mut state, 1, &format!("{f}2"));
-            }
+        // a1–d1 and f1 are filled first (no five yet). e1 closes a six.
+        let blacks = ["a1", "b1", "c1", "d1", "f1"];
+        let whites = ["a2", "b2", "c2", "d2", "f2"];
+        for i in 0..5 {
+            play(&g, &mut state, 0, blacks[i]);
+            play(&g, &mut state, 1, whites[i]);
         }
+        play(&g, &mut state, 0, "e1");
         assert!(g.is_terminal(&state));
-        assert_eq!(g.result(&state).unwrap().scores[0], 1.0);
+        let result = g.result(&state).unwrap();
+        assert_eq!(result.scores[0], 1.0);
+        assert!(g.view(&state, &Viewer { seat: None, omniscient: false }).unwrap()["winLine"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 6);
     }
 
     #[test]
@@ -683,23 +689,21 @@ mod tests {
     #[test]
     fn full_board_draw() {
         let g = Gomoku;
-        // Period-4 coloring whose longest run is 3. o15 belongs to black,
-        // so the last move does not complete five.
+        // (c + 2r) mod 4, black on 0 and 1. a1 is empty; filling it does not make five.
         let mut board = vec![0u8; 225];
         for r in 0..15 {
             for c in 0..15 {
-                if r == 14 && c == 14 {
+                if r == 0 && c == 0 {
                     continue;
                 }
-                let v = (c + r * 2) % 4;
-                board[r * 15 + c] = if v == 3 { 2 } else { 1 };
+                board[r * 15 + c] = if (c + 2 * r) % 4 < 2 { 1 } else { 2 };
             }
         }
         let st = GState {
             size: 15,
             board,
             turn: 0,
-            last: Some("n15".into()),
+            last: Some("b1".into()),
             winner: None,
             win_line: vec![],
             variant: "free".into(),
@@ -708,7 +712,7 @@ mod tests {
         };
         let state = to_value(&st);
         let (next, _) = g
-            .apply(&state, 0, &place_action("o15"), &mut NopRng)
+            .apply(&state, 0, &place_action("a1"), &mut NopRng)
             .unwrap();
         assert!(g.is_terminal(&next));
         assert_eq!(g.result(&next).unwrap().reason, "draw");
