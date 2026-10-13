@@ -294,13 +294,13 @@ async fn keys_doc(State(app): State<App>) -> Json<Value> {
 
 async fn skill_doc(State(app): State<App>) -> Json<Value> {
     let mut doc = app.skill_doc();
-    let (_bytes, sha) = skill_bundle();
+    let (_bytes, sha) = skill_bundle(&app.signing_origin(), &app.config().public_base_url);
     doc["sha256"] = json!(sha);
     Json(doc)
 }
 
-async fn skill_zip() -> impl IntoResponse {
-    let (bytes, _sha) = skill_bundle();
+async fn skill_zip(State(app): State<App>) -> impl IntoResponse {
+    let (bytes, _sha) = skill_bundle(&app.signing_origin(), &app.config().public_base_url);
     (
         [
             (header::CONTENT_TYPE, "application/zip"),
@@ -314,11 +314,15 @@ async fn skill_zip() -> impl IntoResponse {
     )
 }
 
-fn skill_bundle() -> (Vec<u8>, String) {
+fn skill_bundle(origin: &str, public_base_url: &str) -> (Vec<u8>, String) {
     use std::io::Write;
     use std::sync::OnceLock;
     static ZIP: OnceLock<(Vec<u8>, String)> = OnceLock::new();
+    let origin = origin.to_string();
+    let public_base_url = public_base_url.to_string();
     ZIP.get_or_init(|| {
+        let skill_md = crate::crypto::materialize_skill_md(&origin, &public_base_url);
+        let sign_mjs = crate::crypto::materialize_sign_mjs(&origin);
         let mut cursor = std::io::Cursor::new(Vec::new());
         {
             let mut zip = zip::ZipWriter::new(&mut cursor);
@@ -329,11 +333,9 @@ fn skill_bundle() -> (Vec<u8>, String) {
                 .last_modified_time(modified)
                 .unix_permissions(0o644);
             zip.start_file("arena/SKILL.md", opts).ok();
-            zip.write_all(include_str!("../skill/arena/SKILL.md").as_bytes())
-                .ok();
+            zip.write_all(skill_md.as_bytes()).ok();
             zip.start_file("arena/scripts/sign.mjs", opts).ok();
-            zip.write_all(include_str!("../skill/arena/scripts/sign.mjs").as_bytes())
-                .ok();
+            zip.write_all(sign_mjs.as_bytes()).ok();
             zip.finish().ok();
         }
         let bytes = cursor.into_inner();

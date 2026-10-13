@@ -124,6 +124,10 @@ impl App {
         &self.inner.server
     }
 
+    pub fn signing_origin(&self) -> String {
+        crate::crypto::origin_host(&self.inner.cfg.public_base_url)
+    }
+
     pub fn slot(&self, id: Uuid) -> Arc<Slot> {
         self.inner.hub.slot(id)
     }
@@ -177,6 +181,7 @@ impl App {
                 self.server().clone(),
                 &self.inner.hub,
                 id,
+                self.signing_origin(),
             )
             .await
             {
@@ -915,7 +920,7 @@ impl App {
         .map_err(db_err)?;
         Ok(json!({
             "signing_request": {
-                "domain": domain("register_key"),
+                "domain": domain(&self.signing_origin(), "register_key"),
                 "payload": payload,
             }
         }))
@@ -933,7 +938,7 @@ impl App {
             .get("signature")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        if !domain_ok(&domain_v, "register_key") {
+        if !domain_ok(&domain_v, "register_key", &self.signing_origin()) {
             return Err(CallError::new(
                 400,
                 "domain_mismatch",
@@ -1244,6 +1249,7 @@ impl App {
                 self.server().clone(),
                 &self.inner.hub,
                 match_id,
+                self.signing_origin(),
             )
             .await
             .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
@@ -1343,9 +1349,14 @@ impl App {
             })
             .await;
         }
-        let mut body = Engine::read_public(self.pool().clone(), self.server().clone(), match_id)
-            .await
-            .map_err(|_| CallError::new(404, "not_found", "找不到这局"))?;
+        let mut body = Engine::read_public(
+            self.pool().clone(),
+            self.server().clone(),
+            self.signing_origin(),
+            match_id,
+        )
+        .await
+        .map_err(|_| CallError::new(404, "not_found", "找不到这局"))?;
         if body.get("error").is_some() {
             return Err(CallError::new(404, "not_found", "找不到这局"));
         }
@@ -1686,6 +1697,7 @@ impl App {
             self.server().clone(),
             &self.inner.hub,
             match_id,
+            self.signing_origin(),
         )
         .await?;
         Ok(())
@@ -1805,6 +1817,7 @@ impl App {
                 self.server().clone(),
                 &self.inner.hub,
                 match_id,
+                self.signing_origin(),
             )
             .await
             .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
@@ -1817,9 +1830,14 @@ impl App {
             return roundtrip(&tx, |reply| Cmd::Public { reply }).await;
         }
         let viewers = self.inner.hub.slot(match_id).viewers.clone();
-        let mut body = Engine::read_public(self.pool().clone(), self.server().clone(), match_id)
-            .await
-            .map_err(|_| CallError::new(404, "not_found", "找不到这局"))?;
+        let mut body = Engine::read_public(
+            self.pool().clone(),
+            self.server().clone(),
+            self.signing_origin(),
+            match_id,
+        )
+        .await
+        .map_err(|_| CallError::new(404, "not_found", "找不到这局"))?;
         if let Some(obj) = body.as_object_mut() {
             obj.insert(
                 "viewer_count".into(),
@@ -1926,7 +1944,8 @@ impl App {
     }
 
     pub fn skill_doc(&self) -> Value {
-        let digest = sha256_hex(include_str!("../skill/arena/scripts/sign.mjs").as_bytes());
+        let digest =
+            sha256_hex(crate::crypto::materialize_sign_mjs(&self.signing_origin()).as_bytes());
         json!({
             "version": "1.0.0",
             "files": {

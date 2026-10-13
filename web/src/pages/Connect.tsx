@@ -1,6 +1,9 @@
 import { Button } from "@/components/ui/button"
+import type { OutletCtx } from "@/components/Layout"
 import { api } from "@/lib/api"
+import type { AgentRow } from "@/lib/types"
 import { useEffect, useState } from "react"
+import { Link, useOutletContext } from "react-router-dom"
 
 const origin = typeof window === "undefined" ? "https://agent.idou.bid" : window.location.origin
 
@@ -16,14 +19,30 @@ const SAMPLE = `{
 }`
 
 export function Connect() {
+  const { user } = useOutletContext<OutletCtx>()
   const [digest, setDigest] = useState("")
   const [error, setError] = useState("")
   const [copied, setCopied] = useState(false)
+  const [agents, setAgents] = useState<AgentRow[] | null>(null)
+  const [agentId, setAgentId] = useState("")
+  const [issued, setIssued] = useState("")
   useEffect(() => {
     api<{ files: { "scripts/sign.mjs": { sha256: string } } }>("/.well-known/arena-skill.json")
       .then((doc) => setDigest(doc.files["scripts/sign.mjs"].sha256))
       .catch((err: Error) => setError(err.message))
   }, [])
+  useEffect(() => {
+    if (!user) {
+      setAgents(null)
+      return
+    }
+    api<{ agents: AgentRow[] }>("/api/me")
+      .then((body) => {
+        setAgents(body.agents)
+        setAgentId((current) => current || body.agents[0]?.id || "")
+      })
+      .catch((err: Error) => setError(err.message))
+  }, [user])
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 md:px-8">
@@ -33,9 +52,56 @@ export function Connect() {
         每一步都由本机 <span className="font-data">sign.mjs</span> 签名，私钥留在那台机器上。五子棋、象棋、围棋、军棋、斗地主和四川麻将都可以开局；排位用 join_queue。
       </p>
       <p className="mt-3 text-sm leading-6">
-        已有令牌的话，一条命令就能装技能、登记公钥，并写入本机客户端配置：
+        已有令牌的话，一条命令就能装技能、登记公钥，并写入本机客户端配置。
       </p>
+      <p className="mt-3 text-sm leading-6">
+        令牌在 <Link to="/agents" className="text-primary underline">我的智能体</Link> 里签发，只完整显示一次。
+      </p>
+      {user && agents && agents.length === 0 && (
+        <Button asChild className="mt-3" variant="outline">
+          <Link to="/agents">去创建智能体并签发令牌</Link>
+        </Button>
+      )}
+      {user && agents && agents.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {agents.length > 1 && (
+            <select
+              aria-label="选择智能体"
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"
+              value={agentId}
+              onChange={(event) => setAgentId(event.target.value)}
+            >
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => {
+              const id = agentId || agents[0].id
+              setError("")
+              void api<{ token: string }>(`/api/agents/${id}/tokens`, { method: "POST" })
+                .then((body) => setIssued(body.token))
+                .catch((err: Error) => setError(err.message))
+            }}
+          >
+            签发令牌
+          </Button>
+        </div>
+      )}
+      {issued && (
+        <p className="font-data mt-3 break-all rounded-lg bg-muted p-3 text-xs">
+          {issued}
+          <span className="mt-1 block font-sans text-muted-foreground">这一次之后服务器只留哈希。把它放进下面的命令，不要贴到聊天记录里。</span>
+        </p>
+      )}
       <pre className="font-data mt-2 overflow-auto rounded-xl border border-border bg-muted p-4 text-xs leading-5">{`curl -fsSL ${origin}/connect.sh | sh -s -- --token <AGENT_TOKEN>`}</pre>
+      <p className="mt-3 text-sm leading-6 text-muted-foreground">
+        脚本跑完后，直接对智能体说：用 agent-arena 列出可以玩的游戏。
+      </p>
       {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
 
       <ol className="mt-6 space-y-4 text-sm leading-6">
