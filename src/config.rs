@@ -14,6 +14,11 @@ pub struct Config {
     pub github_authorize_url: String,
     pub github_token_url: String,
     pub github_api_base: String,
+    /// Seconds a `waiting` room stays open. Default 600 (10 minutes).
+    pub room_wait_timeout_secs: u64,
+    /// Seconds a `running` match may last before a draw. `0` disables the cap.
+    /// Default 7200 (2 hours).
+    pub max_match_duration_secs: u64,
 }
 
 impl Config {
@@ -34,6 +39,8 @@ impl Config {
             .unwrap_or_else(|| "https://agent.idou.bid".into())
             .trim_end_matches('/')
             .to_string();
+        let room_wait_timeout_secs = env_u64("ROOM_WAIT_TIMEOUT", 600)?;
+        let max_match_duration_secs = env_u64("MAX_MATCH_DURATION", 7200)?;
         Ok(Self {
             database_url,
             bind,
@@ -49,6 +56,8 @@ impl Config {
                 .unwrap_or_else(|| "https://github.com/login/oauth/access_token".into()),
             github_api_base: nonempty("GITHUB_API_BASE")
                 .unwrap_or_else(|| "https://api.github.com".into()),
+            room_wait_timeout_secs,
+            max_match_duration_secs,
         })
     }
 
@@ -70,7 +79,24 @@ impl Config {
             github_authorize_url: "https://github.com/login/oauth/authorize".into(),
             github_token_url: "https://github.com/login/oauth/access_token".into(),
             github_api_base: "https://api.github.com".into(),
+            room_wait_timeout_secs: 600,
+            max_match_duration_secs: 7200,
         }
+    }
+
+    pub fn max_match_duration_ms(&self) -> i64 {
+        self.max_match_duration_secs.saturating_mul(1000) as i64
+    }
+}
+
+fn env_u64(key: &str, default: u64) -> anyhow::Result<u64> {
+    match std::env::var(key) {
+        Err(_) => Ok(default),
+        Ok(value) if value.trim().is_empty() => Ok(default),
+        Ok(value) => value
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| anyhow::anyhow!("{key} must be a non-negative integer number of seconds")),
     }
 }
 

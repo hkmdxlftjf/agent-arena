@@ -14,12 +14,20 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot, Notify};
 use uuid::Uuid;
 
+fn default_seen() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Decision {
     pub seq: i64,
     pub prev_hash: String,
     pub seat: i32,
     pub deadline_at: i64,
+    /// False until this seat calls get_state or wait_for_turn on this decision.
+    /// Missing on older rows, which count as seen so a restart is not an abandon.
+    #[serde(default = "default_seen")]
+    pub seen: bool,
 }
 
 pub enum Cmd {
@@ -39,6 +47,13 @@ pub enum Cmd {
     Resign {
         agent_id: Uuid,
         reply: oneshot::Sender<Value>,
+    },
+    Leave {
+        agent_id: Uuid,
+        reply: oneshot::Sender<Value>,
+    },
+    Shutdown {
+        reply: oneshot::Sender<()>,
     },
 }
 
@@ -97,6 +112,17 @@ struct Secret {
     salt: String,
 }
 
+struct RoomSnapshot {
+    chain: Chain,
+    state: Option<Value>,
+    decisions: Vec<Decision>,
+    status: String,
+    result: Option<Value>,
+    end_reason: Option<String>,
+    players: Vec<(i32, i32, i32, bool, Option<f64>)>,
+    secrets: Vec<Secret>,
+}
+
 struct Player {
     seat: i32,
     agent_id: Uuid,
@@ -107,6 +133,7 @@ struct Player {
     kid: String,
     public_b64: String,
     timeouts: i32,
+    unseen: i32,
     forfeited: bool,
     last_seen: Option<DateTime<Utc>>,
     score: Option<f64>,
@@ -143,6 +170,9 @@ pub struct Engine {
     viewers: Arc<AtomicUsize>,
     events: broadcast::Sender<String>,
     notify: Arc<Notify>,
+    started_at: Option<DateTime<Utc>>,
+    max_match_duration_ms: i64,
+    slot: Arc<Slot>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -164,6 +194,7 @@ struct MatchRow {
     seed_commit: Option<String>,
     result: Option<Value>,
     end_reason: Option<String>,
+    started_at: Option<DateTime<Utc>>,
     game_version_id: Uuid,
     game_version: String,
     game_name: String,
@@ -175,6 +206,7 @@ struct PlayerRow {
     agent_id: Uuid,
     kid: Option<String>,
     timeouts: i32,
+    unseen_timeouts: i32,
     forfeited: bool,
     score: Option<f64>,
     name: String,
@@ -191,6 +223,7 @@ pub async fn spawn_room(
     hub: &Hub,
     id: Uuid,
     origin: String,
+    max_match_duration_ms: i64,
 ) -> anyhow::Result<()> {
     let slot = hub.slot(id);
     let rx = {
@@ -207,9 +240,8 @@ pub async fn spawn_room(
         server,
         origin,
         id,
-        slot.notify.clone(),
-        slot.events.clone(),
-        slot.viewers.clone(),
+        slot.clone(),
+        max_match_duration_ms,
     )
     .await
     {
@@ -235,17 +267,27 @@ impl Engine {
         server: ServerKey,
         origin: String,
         id: Uuid,
-        notify: Arc<Notify>,
-        events: broadcast::Sender<String>,
-        viewers: Arc<AtomicUsize>,
+        slot: Arc<Slot>,
+        max_match_duration_ms: i64,
     ) -> anyhow::Result<Self> {
-        let mut engine = Self::read(pool, server, origin, id, notify, events, viewers).await?;
+        let mut engine = Self::read(pool, server, origin, id, slot, max_match_duration_ms).await?;
         if engine.status == "running" && engine.chain.entries.is_empty() {
             engine.open_genesis().await?;
         }
-        if engine.status == "running" && engine.decisions.is_empty() && !engine.is_terminal() {
-            engine.refresh_decisions();
-            engine.commit().await?;
+        if engine.status == "running" && engine.duration_due() {
+            engine.adjudicate_duration().await?;
+        } else if engine.status == "running" {
+            let now = now_ms();
+            let overdue = engine
+                .decisions
+                .iter()
+                .any(|d| now > d.deadline_at + engine.grace_ms);
+            if overdue {
+                engine.fire_due().await?;
+            } else if engine.decisions.is_empty() && !engine.is_terminal() {
+                engine.refresh_decisions();
+                engine.commit().await?;
+            }
         }
         engine.broadcast();
         Ok(engine)
@@ -258,16 +300,13 @@ impl Engine {
         id: Uuid,
     ) -> anyhow::Result<Value> {
         let (events, _) = broadcast::channel(1);
-        let engine = Self::read(
-            pool,
-            server,
-            origin,
-            id,
-            Arc::new(Notify::new()),
+        let slot = Arc::new(Slot {
+            notify: Arc::new(Notify::new()),
             events,
-            Arc::new(AtomicUsize::new(0)),
-        )
-        .await?;
+            viewers: Arc::new(AtomicUsize::new(0)),
+            cmd: Mutex::new(None),
+        });
+        let engine = Self::read(pool, server, origin, id, slot, 0).await?;
         Ok(engine.public_json())
     }
 
@@ -276,15 +315,17 @@ impl Engine {
         server: ServerKey,
         origin: String,
         id: Uuid,
-        notify: Arc<Notify>,
-        events: broadcast::Sender<String>,
-        viewers: Arc<AtomicUsize>,
+        slot: Arc<Slot>,
+        max_match_duration_ms: i64,
     ) -> anyhow::Result<Self> {
+        let notify = slot.notify.clone();
+        let events = slot.events.clone();
+        let viewers = slot.viewers.clone();
         let row = sqlx::query_as::<_, MatchRow>(
             r#"SELECT m.game_id, m.variant, m.mode, m.room_code, m.time_limit_ms, m.timeout_policy,
                       m.max_consecutive_timeouts, m.grace_ms, m.allow_comments, m.rules_hash, m.status,
                       m.state, m.open_decisions, m.seed, m.seed_commit, m.result, m.end_reason,
-                      m.game_version_id, gv.version AS game_version, g.name AS game_name
+                      m.started_at, m.game_version_id, gv.version AS game_version, g.name AS game_name
                FROM matches m
                JOIN game_versions gv ON gv.id = m.game_version_id
                JOIN games g ON g.id = m.game_id
@@ -298,7 +339,7 @@ impl Engine {
         let game = load_game(&pool, &row.game_id, row.game_version_id).await?;
 
         let prows = sqlx::query_as::<_, PlayerRow>(
-            r#"SELECT mp.seat, mp.agent_id, mp.kid, mp.timeouts, mp.forfeited, mp.score,
+            r#"SELECT mp.seat, mp.agent_id, mp.kid, mp.timeouts, mp.unseen_timeouts, mp.forfeited, mp.score,
                       a.name, a.allow_comments, a.model_label, a.last_seen_at, u.handle,
                       k.public_key_b64
                FROM match_players mp
@@ -324,6 +365,7 @@ impl Engine {
                 kid: p.kid.unwrap_or_default(),
                 public_b64: p.public_key_b64.unwrap_or_default(),
                 timeouts: p.timeouts,
+                unseen: p.unseen_timeouts,
                 forfeited: p.forfeited,
                 last_seen: p.last_seen_at,
                 score: p.score,
@@ -397,6 +439,9 @@ impl Engine {
             viewers,
             events,
             notify,
+            started_at: row.started_at,
+            max_match_duration_ms,
+            slot,
         })
     }
 
@@ -469,12 +514,21 @@ impl Engine {
             tokio::select! {
                 cmd = rx.recv() => {
                     match cmd {
-                        Some(cmd) => self.on_cmd(cmd).await,
+                        Some(cmd) => {
+                            if self.on_cmd(cmd).await {
+                                break;
+                            }
+                        }
                         None => break,
                     }
                 }
                 _ = sleep => {
-                    if let Err(err) = self.fire_due().await {
+                    let result = if self.duration_due() {
+                        self.adjudicate_duration().await
+                    } else {
+                        self.fire_due().await
+                    };
+                    if let Err(err) = result {
                         tracing::error!(error = %err, match_id = %self.match_id, "timeout handling failed");
                         break;
                     }
@@ -483,13 +537,13 @@ impl Engine {
         }
     }
 
-    async fn on_cmd(&mut self, cmd: Cmd) {
+    async fn on_cmd(&mut self, cmd: Cmd) -> bool {
         match cmd {
             Cmd::Public { reply } => {
                 let _ = reply.send(self.public_json());
             }
             Cmd::Agent { agent_id, reply } => {
-                self.mark_seen(agent_id);
+                self.mark_seen(agent_id).await;
                 let _ = reply.send(self.agent_json(agent_id));
             }
             Cmd::Move {
@@ -498,21 +552,54 @@ impl Engine {
                 private,
                 reply,
             } => {
-                self.mark_seen(agent_id);
+                self.mark_seen(agent_id).await;
                 let value = self.handle_move(agent_id, envelope, private).await;
                 let _ = reply.send(value);
             }
             Cmd::Resign { agent_id, reply } => {
-                self.mark_seen(agent_id);
+                self.mark_seen(agent_id).await;
                 let value = self.handle_resign(agent_id).await;
                 let _ = reply.send(value);
             }
+            Cmd::Leave { agent_id, reply } => {
+                let value = self.handle_leave(agent_id).await;
+                let _ = reply.send(value);
+            }
+            Cmd::Shutdown { reply } => {
+                *self.slot.cmd.lock().expect("cmd lock") = None;
+                let _ = reply.send(());
+                return true;
+            }
         }
+        false
     }
 
-    fn mark_seen(&mut self, agent_id: Uuid) {
-        if let Some(p) = self.players.iter_mut().find(|p| p.agent_id == agent_id) {
-            p.last_seen = Some(Utc::now());
+    async fn mark_seen(&mut self, agent_id: Uuid) {
+        let Some(player) = self.players.iter_mut().find(|p| p.agent_id == agent_id) else {
+            return;
+        };
+        player.last_seen = Some(Utc::now());
+        let seat = player.seat;
+        let mut dirty = false;
+        for decision in &mut self.decisions {
+            if decision.seat == seat && !decision.seen {
+                decision.seen = true;
+                dirty = true;
+            }
+        }
+        if !dirty {
+            return;
+        }
+        let value = serde_json::to_value(&self.decisions).unwrap_or(Value::Null);
+        if let Err(err) = sqlx::query(
+            "UPDATE matches SET open_decisions = $2 WHERE id = $1 AND status = 'running'",
+        )
+        .bind(self.match_id)
+        .bind(value)
+        .execute(&self.pool)
+        .await
+        {
+            tracing::warn!(error = %err, match_id = %self.match_id, "failed to persist seen");
         }
     }
 
@@ -521,12 +608,28 @@ impl Engine {
             return None;
         }
         let now = now_ms();
-        let due = self
+        let mut due: Option<i64> = self
             .decisions
             .iter()
             .map(|d| d.deadline_at + self.grace_ms)
-            .min()?;
-        Some((due - now).max(0) as u64)
+            .min();
+        if self.max_match_duration_ms > 0 {
+            if let Some(started) = self.started_at {
+                let cap = started.timestamp_millis() + self.max_match_duration_ms;
+                due = Some(due.map(|d| d.min(cap)).unwrap_or(cap));
+            }
+        }
+        due.map(|at| (at - now).max(0) as u64)
+    }
+
+    fn duration_due(&self) -> bool {
+        if self.status != "running" || self.max_match_duration_ms <= 0 {
+            return false;
+        }
+        let Some(started) = self.started_at else {
+            return false;
+        };
+        now_ms() > started.timestamp_millis() + self.max_match_duration_ms
     }
 
     fn is_terminal(&self) -> bool {
@@ -563,6 +666,7 @@ impl Engine {
                     prev_hash: prev.clone(),
                     seat,
                     deadline_at: deadline,
+                    seen: false,
                 }
             })
             .collect();
@@ -602,6 +706,41 @@ impl Engine {
         let backup_players = self.player_backup();
         let backup_secrets = self.secrets.clone();
 
+        if !d.seen {
+            if let Some(p) = self.players.iter_mut().find(|p| p.seat == d.seat) {
+                p.unseen += 1;
+            }
+            let unseen = self
+                .players
+                .iter()
+                .find(|p| p.seat == d.seat)
+                .map(|p| p.unseen)
+                .unwrap_or(1);
+            if self.max_timeouts > 0 && unseen >= self.max_timeouts {
+                let few = self
+                    .players
+                    .iter()
+                    .all(|p| self.agent_action_count(p.seat) < 2);
+                let result = if few {
+                    self.abort_abandoned(d.seat).await
+                } else {
+                    self.settle_leave(d.seat, "abandoned").await
+                };
+                if let Err(err) = result {
+                    self.chain = backup_chain;
+                    self.state = backup_state;
+                    self.decisions = backup_decisions;
+                    self.status = backup_status;
+                    self.result = backup_result;
+                    self.end_reason = backup_reason;
+                    self.restore_players(backup_players);
+                    self.secrets = backup_secrets;
+                    return Err(err);
+                }
+                return Ok(());
+            }
+        }
+
         if let Some(p) = self.players.iter_mut().find(|p| p.seat == d.seat) {
             p.timeouts += 1;
         }
@@ -612,6 +751,16 @@ impl Engine {
             .map(|p| p.timeouts)
             .unwrap_or(1);
         let mut policy = self.policy;
+        if !d.seen && policy == TimeoutPolicy::Forfeit {
+            let allows_auto = self
+                .game
+                .manifest()
+                .allowed_timeout_policies
+                .contains(&TimeoutPolicy::AutoAction);
+            if allows_auto {
+                policy = TimeoutPolicy::AutoAction;
+            }
+        }
         let allows_forfeit = self
             .game
             .manifest()
@@ -696,21 +845,57 @@ impl Engine {
         Ok(())
     }
 
-    fn player_backup(&self) -> Vec<(i32, i32, bool, Option<f64>)> {
+    fn player_backup(&self) -> Vec<(i32, i32, i32, bool, Option<f64>)> {
         self.players
             .iter()
-            .map(|p| (p.seat, p.timeouts, p.forfeited, p.score))
+            .map(|p| (p.seat, p.timeouts, p.unseen, p.forfeited, p.score))
             .collect()
     }
 
-    fn restore_players(&mut self, backup: Vec<(i32, i32, bool, Option<f64>)>) {
-        for (seat, timeouts, forfeited, score) in backup {
+    fn restore_players(&mut self, backup: Vec<(i32, i32, i32, bool, Option<f64>)>) {
+        for (seat, timeouts, unseen, forfeited, score) in backup {
             if let Some(p) = self.players.iter_mut().find(|p| p.seat == seat) {
                 p.timeouts = timeouts;
+                p.unseen = unseen;
                 p.forfeited = forfeited;
                 p.score = score;
             }
         }
+    }
+
+    fn agent_action_count(&self, seat: i32) -> usize {
+        self.chain
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry["kind"] == "action"
+                    && json_i64(&entry["payload"]["seat"]) == Some(seat as i64)
+            })
+            .count()
+    }
+
+    fn snapshot(&self) -> RoomSnapshot {
+        RoomSnapshot {
+            chain: self.chain.clone(),
+            state: self.state.clone(),
+            decisions: self.decisions.clone(),
+            status: self.status.clone(),
+            result: self.result.clone(),
+            end_reason: self.end_reason.clone(),
+            players: self.player_backup(),
+            secrets: self.secrets.clone(),
+        }
+    }
+
+    fn restore(&mut self, snap: RoomSnapshot) {
+        self.chain = snap.chain;
+        self.state = snap.state;
+        self.decisions = snap.decisions;
+        self.status = snap.status;
+        self.result = snap.result;
+        self.end_reason = snap.end_reason;
+        self.restore_players(snap.players);
+        self.secrets = snap.secrets;
     }
 
     fn opponent(&self, seat: i32) -> i32 {
@@ -793,6 +978,195 @@ impl Engine {
         self.status = "finished".into();
         self.decisions.clear();
         self.chain.append_server("result", "result", payload);
+    }
+
+    fn apply_loss(&mut self, seat: i32) -> anyhow::Result<()> {
+        let state = self
+            .state
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("match has no state"))?;
+        let mut rng = crate::game::SeededRng::from_seed_seq(&self.seed, 0);
+        match self
+            .game
+            .apply(&state, seat, &json!({"type": "leave"}), &mut rng)
+        {
+            Ok((next, _)) => {
+                self.state = Some(next);
+                Ok(())
+            }
+            Err(_) => {
+                let mut rng = crate::game::SeededRng::from_seed_seq(&self.seed, 0);
+                let (next, _) = self
+                    .game
+                    .apply(&state, seat, &json!({"type": "resign"}), &mut rng)
+                    .map_err(|err| anyhow::anyhow!(err.0))?;
+                self.state = Some(next);
+                Ok(())
+            }
+        }
+    }
+
+    async fn settle_leave(&mut self, seat: i32, end_reason: &str) -> anyhow::Result<()> {
+        if self.status != "running" {
+            return Ok(());
+        }
+        let snap = self.snapshot();
+        if let Err(err) = self.apply_loss(seat) {
+            self.restore(snap);
+            return Err(err);
+        }
+        if let Some(p) = self.players.iter_mut().find(|p| p.seat == seat) {
+            p.forfeited = true;
+        }
+        let decision_seq = self
+            .decisions
+            .iter()
+            .find(|d| d.seat == seat)
+            .map(|d| d.seq);
+        self.chain.append_server(
+            "leave",
+            "leave",
+            json!({
+                "match_id": self.match_id.to_string(),
+                "seat": seat,
+                "decision_seq": decision_seq,
+                "reason": end_reason,
+                "action": {"type": "leave"},
+            }),
+        );
+        self.finish_if_terminal();
+        if self.status != "finished" {
+            self.restore(snap);
+            anyhow::bail!("leave did not end the match");
+        }
+        self.end_reason = Some(end_reason.to_string());
+        self.decisions.clear();
+        if let Err(err) = self.commit().await {
+            self.restore(snap);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    async fn abort_abandoned(&mut self, seat: i32) -> anyhow::Result<()> {
+        if self.status != "running" {
+            return Ok(());
+        }
+        let snap = self.snapshot();
+        self.status = "aborted".into();
+        self.end_reason = Some("abandoned".into());
+        self.result = None;
+        self.decisions.clear();
+        if let Some(p) = self.players.iter_mut().find(|p| p.seat == seat) {
+            p.forfeited = true;
+        }
+        self.chain.append_server(
+            "abandon",
+            "abandon",
+            json!({
+                "match_id": self.match_id.to_string(),
+                "seat": seat,
+                "reason": "abandoned",
+            }),
+        );
+        if let Err(err) = self.commit().await {
+            self.restore(snap);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    async fn adjudicate_duration(&mut self) -> anyhow::Result<()> {
+        if self.status != "running" || !self.duration_due() {
+            return Ok(());
+        }
+        let snap = self.snapshot();
+        if self.game_id == "gomoku" {
+            if let Some(state) = self.state.clone() {
+                self.state = Some(force_terminal(&state, -1, "duration"));
+            }
+        }
+        if !self.secrets.is_empty() {
+            let reveals: Vec<Value> = self
+                .secrets
+                .iter()
+                .map(|s| {
+                    json!({
+                        "data": s.data,
+                        "salt": s.salt,
+                        "commitment": s.commitment,
+                        "seat": s.seat,
+                    })
+                })
+                .collect();
+            self.chain.append_server(
+                "reveal",
+                "reveal",
+                json!({
+                    "match_id": self.match_id.to_string(),
+                    "reveals": reveals,
+                }),
+            );
+            self.secrets.clear();
+        }
+        let n = self.players.iter().map(|p| p.seat).max().unwrap_or(0) as usize + 1;
+        let share = if n == 0 { 0.0 } else { 1.0 / n as f64 };
+        let scores = vec![share; n];
+        for p in &mut self.players {
+            p.score = scores.get(p.seat as usize).copied();
+        }
+        let ranking = vec![(0..n).map(|seat| seat as i32).collect::<Vec<_>>()];
+        let result = json!({
+            "scores": scores,
+            "ranking": ranking,
+            "reason": "duration",
+        });
+        let final_hash = self.chain.tip_hash().to_string();
+        self.result = Some(result.clone());
+        self.end_reason = Some("duration".into());
+        self.status = "finished".into();
+        self.decisions.clear();
+        self.chain.append_server(
+            "result",
+            "result",
+            json!({
+                "match_id": self.match_id.to_string(),
+                "result": result,
+                "final_hash": final_hash,
+                "seed": self.seed_hex,
+            }),
+        );
+        if let Err(err) = self.commit().await {
+            self.restore(snap);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    async fn handle_leave(&mut self, agent_id: Uuid) -> Value {
+        let Some(seat) = self
+            .players
+            .iter()
+            .find(|p| p.agent_id == agent_id)
+            .map(|p| p.seat)
+        else {
+            return json!({"accepted": false, "error": "not_seated", "message": "你不在这局里"});
+        };
+        if self.status != "running" || self.is_terminal() {
+            return json!({"accepted": false, "error": "game_over", "message": "对局不在进行中"});
+        }
+        if let Err(err) = self.settle_leave(seat, "leave").await {
+            return json!({"accepted": false, "error": "persist", "message": err.to_string()});
+        }
+        let entry = self
+            .chain
+            .entries
+            .iter()
+            .rev()
+            .find(|e| e["kind"] == "leave")
+            .cloned()
+            .unwrap_or(Value::Null);
+        accepted_from(&entry, false)
     }
 
     async fn handle_resign(&mut self, agent_id: Uuid) -> Value {
@@ -1360,7 +1734,7 @@ impl Engine {
                  tip_hash = $5,
                  status = $6,
                  result = $7,
-                 ended_at = CASE WHEN $6 = 'finished' THEN COALESCE(ended_at, now()) ELSE ended_at END,
+                 ended_at = CASE WHEN $6 IN ('finished', 'aborted', 'expired') THEN COALESCE(ended_at, now()) ELSE ended_at END,
                  end_reason = $8,
                  seed = $9,
                  seed_commit = $10,
@@ -1381,13 +1755,14 @@ impl Engine {
         .await?;
         for p in &self.players {
             sqlx::query(
-                "UPDATE match_players SET timeouts = $3, forfeited = $4, score = $5 WHERE match_id = $1 AND seat = $2",
+                "UPDATE match_players SET timeouts = $3, forfeited = $4, score = $5, unseen_timeouts = $6 WHERE match_id = $1 AND seat = $2",
             )
             .bind(self.match_id)
             .bind(p.seat as i16)
             .bind(p.timeouts)
             .bind(p.forfeited)
             .bind(p.score)
+            .bind(p.unseen)
             .execute(&mut *tx)
             .await?;
         }
@@ -1410,7 +1785,7 @@ impl Engine {
         let settling = self.chain.entries[self.persisted..]
             .iter()
             .any(|e| e["kind"] == "result");
-        if settling && self.mode == "ranked" {
+        if settling && self.mode == "ranked" && self.status == "finished" {
             let participants: Vec<(Uuid, f64)> = self
                 .players
                 .iter()
@@ -1420,6 +1795,9 @@ impl Engine {
         }
         tx.commit().await?;
         self.persisted = self.chain.entries.len();
+        if self.started_at.is_none() && self.status == "running" {
+            self.started_at = Some(Utc::now());
+        }
         self.broadcast();
         Ok(())
     }
@@ -1741,7 +2119,10 @@ async fn insert_event(
 
 fn event_seat_decision(entry: &Value) -> (Option<i16>, Option<i32>) {
     let kind = entry["kind"].as_str().unwrap_or("");
-    if !matches!(kind, "action" | "auto_action" | "resign") {
+    if !matches!(
+        kind,
+        "action" | "auto_action" | "resign" | "leave" | "abandon"
+    ) {
         return (None, None);
     }
     let p = &entry["payload"];
@@ -1753,6 +2134,18 @@ fn event_seat_decision(entry: &Value) -> (Option<i16>, Option<i32>) {
     }
     .map(|n| n as i32);
     (seat, decision)
+}
+
+pub async fn shutdown_room(hub: &Hub, id: Uuid) -> anyhow::Result<()> {
+    let Some(tx) = hub.sender(id) else {
+        return Ok(());
+    };
+    let (reply, rx) = oneshot::channel();
+    tx.send(Cmd::Shutdown { reply })
+        .await
+        .map_err(|_| anyhow::anyhow!("actor down"))?;
+    rx.await.map_err(|_| anyhow::anyhow!("actor down"))?;
+    Ok(())
 }
 
 pub async fn roundtrip(

@@ -250,6 +250,14 @@ type Registry interface {
 - **MCP 体现：** `wait_for_turn` / `get_state` 返回 `deadline_at`、`remaining_ms`、`time_limit_ms`、`timeout_policy`、`consecutive_timeouts`，以及签入载荷的 `signing_request.deadline_at`；截止后提交的 `make_move` 返回错误 `deadline_passed`，附带已自动执行的动作。
 - **UI 体现：** 见 §9.5 计时器（60 秒圆环、30 秒警告、10 秒危险、超时自动动作提示）。
 
+现网实现比上面的稿子窄一些，以代码为准：
+
+- 单步截止时间存在 `open_decisions.deadline_at`。宽限 `grace_ms`（默认 2000）之后，房间任务写入服务器签名的 `auto_action`。策略是 `forfeit`，或连续超时达到 `max_consecutive_timeouts` 时，终局原因是 `timeout`。自动走子的日志文案是「超时，服务器代走」，判负是「超时判负」。
+- 决策点在 `get_state` / `wait_for_turn` 之前记为未见。连续未见达到上限：双方都还不到两步时对局 `aborted`，原因 `abandoned`，不记分；否则按退出结算，对方获胜。进程拉起时如果截止时间已过，马上结算，不等下一轮时钟。
+- `leave_room` 和比赛页「退出」：开局前让出席位，房间空了就关闭（`aborted` / `closed`），没有结果。开局后调用方判负，日志为服务器签名的 `leave`。斗地主地主退出农民胜，农民退出地主胜。麻将退出方扣封顶 16，其余三家分这 16 分，牌局结束。对方的 `wait_for_turn` 返回 `match_over`，`reason` 为 `opponent_left`。排位在终局为 `finished` 时才改分。
+- 等待中的房间超过 `ROOM_WAIT_TIMEOUT`（默认 600 秒）变为 `expired`，原因 `room_expired`，大厅不列出，`join_room` 返回 `room_expired`。进行中的对局超过 `MAX_MATCH_DURATION`（默认 7200 秒，0 表示不封顶）以和棋收场，原因 `duration`，服务器签名。
+- 页面倒计时不足 15 秒为琥珀色，不足 5 秒为红色。终局原因显示为「退出」「超时」「房间过期」，不直接显示英文代码。
+
 ## 7. MCP 接口（智能体侧）
 
 ### 7.1 工具

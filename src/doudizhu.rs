@@ -605,22 +605,34 @@ impl Game for DouDizhu {
             return Err(GameError("对局已结束".into()));
         }
         let kind = action.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if kind == "resign" || kind == "timeout_forfeit" {
-            // 三人局认输：该席位记负，其余两家平分胜场（地主认输则农民胜，农民认输则地主胜）。
+        if kind == "resign" || kind == "timeout_forfeit" || kind == "leave" {
+            // 三人局认输或退出：地主退出则农民胜，农民退出则地主胜。
             if let Some(landlord) = s.landlord {
                 if seat as u8 == landlord {
                     settle(&mut s, if landlord == 0 { 1 } else { 0 });
-                    s.reason = Some("resign".into());
                 } else {
                     settle(&mut s, landlord);
-                    s.reason = Some("resign".into());
+                }
+            } else if kind == "leave" {
+                s.winner = Some(-1);
+                s.phase = "over".into();
+                s.points = vec![1, 1, 1];
+                if (seat as usize) < s.points.len() {
+                    s.points[seat as usize] = -2;
                 }
             } else {
                 s.winner = Some(-1);
-                s.reason = Some("resign".into());
                 s.phase = "over".into();
                 s.points = vec![0, 0, 0];
             }
+            s.reason = Some(
+                match kind {
+                    "leave" => "leave",
+                    "timeout_forfeit" => "timeout",
+                    _ => "resign",
+                }
+                .into(),
+            );
             return Ok((serde_json::to_value(s).unwrap(), Vec::new()));
         }
         if seat as u8 != s.turn {

@@ -8,7 +8,7 @@ use crate::crypto::{
 };
 use crate::error::CallError;
 use crate::game::registry;
-use crate::room::{roundtrip, spawn_room, Cmd, Engine, Hub, Slot};
+use crate::room::{roundtrip, shutdown_room, spawn_room, Cmd, Engine, Hub, Slot};
 use argon2::password_hash::{
     rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
 };
@@ -162,6 +162,9 @@ impl App {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if let Err(err) = matcher.expire_waiting_rooms().await {
+                    tracing::warn!(error = %err, "room expiry");
+                }
                 if let Err(err) = matcher.matchmake_once().await {
                     tracing::warn!(error = %err, "matchmaker");
                 }
@@ -182,6 +185,7 @@ impl App {
                 &self.inner.hub,
                 id,
                 self.signing_origin(),
+                self.match_limit_ms(),
             )
             .await
             {
@@ -1193,6 +1197,9 @@ impl App {
             .resolve_game(&game_id)
             .map(|g| i64::from(g.manifest.max_players))
             .unwrap_or(2);
+        if status == "expired" {
+            return Err(CallError::new(409, "room_expired", "房间已过期"));
+        }
         if status != "waiting" || n >= max {
             return Err(CallError::new(409, "room_full", "房间已满或已开始"));
         }
@@ -1250,6 +1257,7 @@ impl App {
                 &self.inner.hub,
                 match_id,
                 self.signing_origin(),
+                self.match_limit_ms(),
             )
             .await
             .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
@@ -1367,13 +1375,14 @@ impl App {
         body["seat"] = json!(seat);
         body["legal_actions"] = json!([]);
         body["signing_request"] = Value::Null;
-        body["phase"] = json!(
-            if body["status"] == "finished" || body["status"] == "aborted" {
-                "game_over"
-            } else {
-                "waiting"
-            }
-        );
+        body["phase"] = json!(if body["status"] == "finished"
+            || body["status"] == "aborted"
+            || body["status"] == "expired"
+        {
+            "game_over"
+        } else {
+            "waiting"
+        });
         body["remaining_ms"] = json!(0);
         body["consecutive_timeouts"] = json!(0);
         Ok(body)
@@ -1698,6 +1707,7 @@ impl App {
             &self.inner.hub,
             match_id,
             self.signing_origin(),
+            self.match_limit_ms(),
         )
         .await?;
         Ok(())
@@ -1818,11 +1828,120 @@ impl App {
                 &self.inner.hub,
                 match_id,
                 self.signing_origin(),
+                self.match_limit_ms(),
             )
             .await
             .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
         }
         Ok(())
+    }
+
+    fn match_limit_ms(&self) -> i64 {
+        self.config().max_match_duration_ms()
+    }
+
+    pub async fn expire_waiting_rooms(&self) -> anyhow::Result<u64> {
+        let secs = self.config().room_wait_timeout_secs as i64;
+        let result = sqlx::query(
+            r#"UPDATE matches
+               SET status = 'expired', end_reason = 'room_expired', ended_at = now()
+               WHERE status = 'waiting'
+                 AND created_at < now() - ($1::bigint * interval '1 second')"#,
+        )
+        .bind(secs)
+        .execute(self.pool())
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn shutdown_match(&self, match_id: Uuid) -> anyhow::Result<()> {
+        shutdown_room(&self.inner.hub, match_id).await
+    }
+
+    pub async fn reopen_match(&self, match_id: Uuid) -> Result<(), CallError> {
+        self.ensure_actor(match_id).await
+    }
+
+    pub async fn leave_as_user(&self, user_id: Uuid, match_id: Uuid) -> Result<Value, CallError> {
+        let agent_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT agent_id FROM match_players WHERE match_id = $1 AND owner_id = $2 ORDER BY seat LIMIT 1",
+        )
+        .bind(match_id)
+        .bind(user_id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        let Some(agent_id) = agent_id else {
+            return Err(CallError::new(
+                403,
+                "not_seated",
+                "你没有坐在这局里的智能体",
+            ));
+        };
+        self.leave_room(agent_id, match_id).await
+    }
+
+    pub async fn leave_room(&self, agent_id: Uuid, match_id: Uuid) -> Result<Value, CallError> {
+        let mut tx = self.pool().begin().await.map_err(db_err)?;
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM matches WHERE id = $1 FOR UPDATE")
+                .bind(match_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        let Some(status) = status else {
+            return Err(CallError::new(404, "not_found", "找不到这局"));
+        };
+        let seated: Option<i16> = sqlx::query_scalar(
+            "SELECT seat FROM match_players WHERE match_id = $1 AND agent_id = $2",
+        )
+        .bind(match_id)
+        .bind(agent_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        if seated.is_none() {
+            return Err(CallError::new(403, "not_seated", "你不在这局里"));
+        }
+        if status == "waiting" {
+            sqlx::query("DELETE FROM match_players WHERE match_id = $1 AND agent_id = $2")
+                .bind(match_id)
+                .bind(agent_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+            let left: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM match_players WHERE match_id = $1")
+                    .bind(match_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            if left == 0 {
+                sqlx::query(
+                    "UPDATE matches SET status = 'aborted', end_reason = 'closed', ended_at = now() WHERE id = $1",
+                )
+                .bind(match_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+            }
+            tx.commit().await.map_err(db_err)?;
+            return Ok(json!({
+                "accepted": true,
+                "status": if left == 0 { "closed" } else { "waiting" },
+            }));
+        }
+        drop(tx);
+        if status != "running" {
+            return Err(CallError::new(409, "game_over", "对局不在进行中"));
+        }
+        self.ensure_actor(match_id).await?;
+        let Some(sender) = self.inner.hub.sender(match_id) else {
+            return Ok(
+                json!({"accepted": false, "error": "game_over", "message": "对局不在进行中"}),
+            );
+        };
+        roundtrip(&sender, |reply| Cmd::Leave { agent_id, reply }).await
     }
 
     pub async fn public_match(&self, match_id: Uuid) -> Result<Value, CallError> {
@@ -1983,17 +2102,34 @@ fn map_turn(view: &Value) -> Value {
         .get("signing_request")
         .map(|v| v.is_object())
         .unwrap_or(false);
-    let turn_status = if status == "finished" || status == "aborted" || phase == "game_over" {
+    let end_reason = view
+        .get("end_reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let over =
+        status == "finished" || status == "aborted" || status == "expired" || phase == "game_over";
+    let left = end_reason == "leave" || end_reason == "abandoned";
+    let turn_status = if over && left {
+        "match_over"
+    } else if over {
         "game_over"
     } else if your_turn {
         "your_turn"
     } else {
         "not_your_turn"
     };
+    let reason = if turn_status == "match_over" {
+        json!("opponent_left")
+    } else if status == "expired" || end_reason == "room_expired" {
+        json!("room_expired")
+    } else {
+        Value::Null
+    };
     json!({
         "status": turn_status,
+        "reason": reason,
         "match_id": view.get("id").cloned().unwrap_or(Value::Null),
-        "phase": if turn_status == "game_over" { "game_over" } else { phase },
+        "phase": if over { "game_over" } else { phase },
         "deadline_at": view.get("deadline_at").cloned().unwrap_or(Value::Null),
         "remaining_ms": view.get("remaining_ms").cloned().unwrap_or(json!(0)),
         "time_limit_ms": view.get("time_limit_ms").cloned().unwrap_or(json!(60000)),

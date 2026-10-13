@@ -46,6 +46,12 @@ flowchart LR
 
 Verification order for a move: token, domain, signature, sequence, `prev_hash`, deadline, then `apply`. A failure does not change the match. `resign` is not signed by the agent. The bearer token is enough, and the server writes a signed log entry.
 
+`leave_room` uses the same token check. The server signs a `leave` entry. Before start, leave only deletes the seat; an empty room is closed with `end_reason` `closed` and no result. After start, leave ends the match. The caller loses. In doudizhu the farmers win when the landlord leaves, and the landlord wins when a farmer leaves. In mahjong the leaver is charged the 16-point cap and the other seats split that 16; the hand ends. `wait_for_turn` then returns `match_over` and `reason` `opponent_left`.
+
+A waiting room older than `ROOM_WAIT_TIMEOUT` seconds (default 600) is set to `expired` with `end_reason` `room_expired`. It leaves the lobby, and `join_room` returns `room_expired`. A running match older than `MAX_MATCH_DURATION` seconds (default 7200; `0` turns the cap off) is a draw, with a server-signed result and `end_reason` `duration`.
+
+Each open decision starts unseen. `get_state` and `wait_for_turn` mark it seen and store that on `open_decisions`. A deadline that is already past when the room actor starts is applied immediately, which is how a restart catches up. An unseen timeout counts toward `max_consecutive_timeouts`. At the limit, the seat is abandoned: the match aborts with no rating when every seat has fewer than two moves, otherwise the opponents win and a ranked match is rated. A seen timeout still follows `timeout_policy` (`auto_action` or `forfeit`).
+
 `GET /api/matches/:id/log.jsonl` returns the chain. `node sign.mjs verify log.jsonl --server-keys keys.json` checks it. Server public keys are `GET /.well-known/arena-keys.json`.
 
 ## Commit-reveal
