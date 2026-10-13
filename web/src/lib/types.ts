@@ -43,28 +43,64 @@ export type LogEntry = {
   payload: {
     match_id?: string
     seat?: number
-    action?: { type?: string; data?: { at?: string } }
+    action?: { type?: string; data?: Record<string, unknown> }
     comment?: string
     policy?: string
     decision_seq?: number
     result?: { scores?: number[]; ranking?: number[][]; reason?: string }
     reason?: string
+    reveals?: unknown[]
+    commitment?: string
   }
   server_ack?: { kid: string; signature: string }
   domain?: { purpose?: string }
 }
 
-export type BoardView = {
-  size: number
-  board: number[][]
-  stones: { at: string; seat: number }[]
-  lastMove: string | null
-  winLine: string[]
-  toAct: number[]
-  winner: number | null
-  reason: string | null
-  moves: number
-  variant: string
+export type XiangqiPiece = { at: string; side: number; kind: number; label: string }
+export type GoPoint = { at: string; seat: number }
+export type JunqiCell = {
+  at: string
+  zone: string
+  piece: { owner: number; name: string; hidden: boolean } | null
+}
+export type Trick = { seat: number; cards: string[]; kind: string; rank: number; len: number }
+export type Meld = { kind: string; tile: string }
+
+export type GameView = {
+  renderer?: string
+  size?: number
+  stones?: { at: string; seat: number }[]
+  lastMove?: string | { from?: string; to?: string } | null
+  winLine?: string[]
+  toAct?: number[]
+  winner?: number | null
+  reason?: string | null
+  moves?: number
+  variant?: string
+  pieces?: XiangqiPiece[]
+  check?: boolean
+  quiet?: number
+  komi?: number
+  points?: GoPoint[] | number[]
+  passes?: number
+  score?: [number, number] | null
+  phase?: string
+  cells?: JunqiCell[]
+  deployed?: boolean[]
+  last?: Trick | { from?: string; to?: string; result?: string; seat?: number; type?: string } | null
+  hands?: (string[] | null)[] | null
+  counts?: number[]
+  bottom?: string[] | null
+  bid?: number
+  landlord?: number | null
+  multiplier?: number
+  wall?: number
+  melds?: Meld[][]
+  discards?: string[][]
+  dingque?: (string | null)[]
+  lastDraw?: string | null
+  pending?: { tile: string; from: number; kind: string } | null
+  hu?: boolean[]
 }
 
 export type MatchSnap = {
@@ -89,7 +125,7 @@ export type MatchSnap = {
   seed?: string | null
   seed_commit?: string | null
   rules_hash?: string
-  view: BoardView | null
+  view: GameView | null
   seats: SeatCard[]
   entries?: LogEntry[]
   server_keys?: { kid: string; alg: string; public_key: string }[]
@@ -105,7 +141,7 @@ export type LiveCard = {
   tip_seq?: number | null
   viewer_count: number
   seats: SeatCard[]
-  view: BoardView | null
+  view: GameView | null
 }
 
 export type User = {
@@ -125,4 +161,37 @@ export type AgentRow = {
   connected: boolean
   keys: { kid: string; status: string; public_key: string; label?: string | null }[]
   tokens: { id: string; prefix: string; created_at: number; revoked: boolean }[]
+}
+
+export type RatingRow = {
+  game_id: string
+  rating: number
+  rd: number
+  games: number
+  wins: number
+  system: string
+  provisional: boolean
+}
+
+export type BoardRow = {
+  rank: number
+  agent_id: string
+  name: string
+  handle: string
+  rating: number
+  rd: number | null
+  games: number | null
+  wins?: number
+  system?: string
+  provisional: boolean
+  conservative: number
+}
+
+export type RecentMatch = {
+  id: string
+  game_id: string
+  status: string
+  end_reason?: string | null
+  score?: number | null
+  seat: number
 }

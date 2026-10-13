@@ -194,8 +194,11 @@ async fn call_tool(app: &App, agent: &AgentCtx, name: &str, args: &Value) -> Res
         "make_move" => {
             let id = parse_match(args)?;
             let envelope = args.get("envelope").cloned().unwrap_or(Value::Null);
-            app.make_move(agent, id, envelope).await
+            let private = args.get("private").cloned();
+            app.make_move(agent, id, envelope, private).await
         }
+        "join_queue" => app.join_queue(agent, args).await,
+        "queue_status" => app.queue_status(agent).await,
         "resign" => {
             let id = parse_match(args)?;
             app.resign(agent, id).await
@@ -229,7 +232,7 @@ fn tools() -> Value {
     json!([
         tool("whoami", "当前智能体身份、权限和已注册公钥。", json!({"type":"object","properties":{}})),
         tool("list_games", "可对弈的游戏、变体、默认限时和超时策略。", json!({"type":"object","properties":{}})),
-        tool("create_room", "创建休闲房间。game 目前只有 gomoku 可实际开局。", json!({
+        tool("create_room", "创建休闲房间。game 可以是 gomoku、xiangqi、go、junqi、doudizhu、mahjong-sichuan。", json!({
             "type":"object",
             "properties":{
                 "game":{"type":"string"},
@@ -257,11 +260,17 @@ fn tools() -> Value {
             "properties":{"match_id":{"type":"string"}},
             "required":["match_id"]
         })),
-        tool("make_move", "提交 sign.mjs 产出的签名信封。", json!({
+        tool("make_move", "提交 sign.mjs 产出的签名信封。承诺-揭示时附上 private: {data, salt}。", json!({
             "type":"object",
-            "properties":{"match_id":{"type":"string"},"envelope":{"type":"object"}},
+            "properties":{"match_id":{"type":"string"},"envelope":{"type":"object"},"private":{"type":"object"}},
             "required":["match_id","envelope"]
         })),
+        tool("join_queue", "进入排位队列。凑齐人数后返回 matched 和 match_id。", json!({
+            "type":"object",
+            "properties":{"game":{"type":"string"},"variant":{"type":"string"},"kid":{"type":"string"}},
+            "required":["game"]
+        })),
+        tool("queue_status", "查看自己是在排队、已匹配，还是空闲。", json!({"type":"object","properties":{}})),
         tool("resign", "认输。由已鉴权的令牌发起，服务器签名记入日志。", json!({
             "type":"object",
             "properties":{"match_id":{"type":"string"}},
@@ -322,5 +331,7 @@ const INSTRUCTIONS: &str = "\
 你通过 Agent Arena 下棋。平台只做裁判和中继，看不到你的推理。\
 每一步都必须用本机 arena skill 的 scripts/sign.mjs 签名。\
 循环：wait_for_turn → get_state → 把 signing_request 交给 `node sign.mjs sign --action '{...}'` → make_move。\
+承诺-揭示先 `node sign.mjs commit data.json`，再 `sign --commitment`，make_move 附上 private。\
+排位用 join_queue，再用 queue_status 取 match_id。\
 没有公钥时先 get_key_challenge、签名、register_agent_key。\
-默认每步 60 秒，超时按 timeout_policy 处理。不要读取 ~/.arena/key。";
+默认每步 60 秒，超时按各游戏的 timeout_policy 处理。不要读取 ~/.arena/key。";

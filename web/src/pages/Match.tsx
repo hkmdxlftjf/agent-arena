@@ -1,9 +1,10 @@
-import { Board } from "@/components/Board"
+import { ArenaView } from "@/components/ArenaView"
 import { Countdown } from "@/components/Countdown"
 import { MoveLog } from "@/components/MoveLog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
+import { roleOf } from "@/lib/games"
 import type { MatchSnap, SeatCard } from "@/lib/types"
 import { ed25519Available, verifyEntry } from "@/lib/verify"
 import { useEffect, useRef, useState } from "react"
@@ -97,12 +98,13 @@ export function MatchPage() {
   }
   if (!snap) return <main className="mx-auto max-w-5xl px-4 py-8"><div className="h-96 animate-pulse rounded-2xl bg-muted" /></main>
 
-  const acting = snap.to_act?.[0]
-  const black = snap.seats.find((s) => s.seat === 0)
-  const white = snap.seats.find((s) => s.seat === 1)
+  const acting = new Set(snap.to_act ?? [])
   const checked = Object.values(verified)
   const allOk = checked.length > 0 && checked.every((item) => item.signature && item.ack)
   const limit = snap.time_limit_ms ?? 60_000
+  const ordered = [...snap.seats].sort((a, b) => a.seat - b.seat)
+  const head = ordered.length > 1 ? ordered.slice(1) : []
+  const foot = ordered[0]
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6 md:px-8">
@@ -134,31 +136,37 @@ export function MatchPage() {
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,720px)_320px]">
         <section>
-          <SeatBar
-            seat={black}
-            role="黑"
-            active={acting === 0 && snap.status === "running"}
-            deadline={snap.deadline_at}
-            serverTime={snap.server_time}
-            limitMs={limit}
-          />
-          <div className={acting != null && snap.status === "running" ? "rounded-2xl ring-1 ring-primary/40" : ""}>
-            {snap.view ? (
-              <Board stones={snap.view.stones} lastMove={snap.view.lastMove} winLine={snap.view.winLine} />
-            ) : (
-              <div className="grid h-80 place-items-center rounded-2xl border border-dashed border-border text-sm text-muted-foreground">
-                {snap.room_code ? `房间码 ${snap.room_code}，等待第二位智能体` : "棋盘还没摆开"}
-              </div>
-            )}
+          <div className={ordered.length > 2 ? "mb-3 grid gap-2 sm:grid-cols-2" : ""}>
+            {(ordered.length > 2 ? ordered : head).map((seat) => (
+              <SeatBar
+                key={seat.seat}
+                seat={seat}
+                role={seat.role || roleOf(snap.game_id, seat.seat)}
+                active={acting.has(seat.seat) && snap.status === "running"}
+                deadline={snap.deadline_at}
+                serverTime={snap.server_time}
+                limitMs={limit}
+                score={snap.result?.scores?.[seat.seat]}
+              />
+            ))}
           </div>
-          <SeatBar
-            seat={white}
-            role="白"
-            active={acting === 1 && snap.status === "running"}
-            deadline={snap.deadline_at}
-            serverTime={snap.server_time}
-            limitMs={limit}
-          />
+          <div className={acting.size > 0 && snap.status === "running" ? "rounded-2xl ring-1 ring-primary/40" : ""}>
+            <ArenaView gameId={snap.game_id} view={snap.view} />
+          </div>
+          {ordered.length <= 2 && foot && (
+            <SeatBar
+              seat={foot}
+              role={foot.role || roleOf(snap.game_id, foot.seat)}
+              active={acting.has(foot.seat) && snap.status === "running"}
+              deadline={snap.deadline_at}
+              serverTime={snap.server_time}
+              limitMs={limit}
+              score={snap.result?.scores?.[foot.seat]}
+            />
+          )}
+          {snap.status === "waiting" && (
+            <p className="mt-3 text-sm text-muted-foreground">{snap.room_code ? `房间码 ${snap.room_code}，还在等人入座` : "等待入座"}</p>
+          )}
           {snap.status === "finished" && (
             <p className="mt-3 text-sm">
               终局：{snap.result?.reason || snap.end_reason || "结束"}
@@ -168,7 +176,7 @@ export function MatchPage() {
         </section>
         <aside className="overflow-hidden rounded-xl border border-border bg-card">
           <div className="border-b border-border px-4 py-3 text-sm font-medium">动作日志</div>
-          <MoveLog entries={snap.entries ?? []} verified={verified} />
+          <MoveLog entries={snap.entries ?? []} verified={verified} gameId={snap.game_id} />
         </aside>
       </div>
     </main>
@@ -182,6 +190,7 @@ function SeatBar({
   deadline,
   serverTime,
   limitMs,
+  score,
 }: {
   seat?: SeatCard
   role: string
@@ -189,18 +198,20 @@ function SeatBar({
   deadline?: number | null
   serverTime?: number
   limitMs: number
+  score?: number | null
 }) {
   return (
     <div className={`my-3 flex items-center gap-3 rounded-xl border px-3 py-2 ${active ? "border-primary shadow-[0_0_0_1px_var(--primary),0_0_20px_-8px_var(--primary)]" : "border-border"}`}>
-      <span className={`grid size-8 place-items-center rounded-full text-xs ${role === "黑" ? "bg-zinc-900 text-white" : "border border-zinc-300 bg-white"}`}>
-        {role}
-      </span>
+      <span className="grid size-8 place-items-center rounded-full border border-zinc-300 bg-white text-xs">{role}</span>
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{seat?.agent_name || "空位"}</p>
+        <p className="truncate text-sm font-medium">
+          {seat?.agent_id ? <Link to={`/a/${seat.agent_id}`} className="hover:text-primary">{seat.agent_name}</Link> : "空位"}
+        </p>
         <p className="truncate text-xs text-muted-foreground">
-          {seat?.owner_handle ? `@${seat.owner_handle}` : "等待入座"}
+          {seat?.owner_handle ? <Link to={`/u/${seat.owner_handle}`}>@{seat.owner_handle}</Link> : "等待入座"}
           {seat?.connected ? " · 在线" : ""}
           {seat?.model_label ? ` · ${seat.model_label}` : ""}
+          {score != null ? ` · ${score > 0 ? "+" : ""}${score}` : ""}
         </p>
       </div>
       <div className="ml-auto">

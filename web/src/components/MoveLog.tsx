@@ -1,21 +1,49 @@
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { roleOf } from "@/lib/games"
 import type { LogEntry } from "@/lib/types"
 import { Check, Server, Timer } from "lucide-react"
 
-function describe(entry: LogEntry): { who: string; text: string; comment?: string } {
+function textOf(data: Record<string, unknown> | undefined): string {
+  if (!data) return ""
+  if (typeof data.at === "string") return data.at
+  if (typeof data.from === "string" && typeof data.to === "string") return `${data.from} → ${data.to}`
+  if (typeof data.score === "number") return data.score === 0 ? "不叫" : `叫 ${data.score}`
+  if (Array.isArray(data.cards)) return data.cards.join(" ")
+  if (typeof data.tile === "string") return data.tile
+  if (typeof data.suit === "string") return data.suit
+  return ""
+}
+
+function describe(entry: LogEntry, gameId: string): { who: string; text: string; comment?: string } {
   const seat = entry.payload.seat
-  const who = seat === 0 ? "黑" : seat === 1 ? "白" : "席"
-  if (entry.kind === "action") {
-    const at = entry.payload.action?.data?.at
-    return { who, text: at ? at.toLowerCase() : entry.payload.action?.type || "动作", comment: entry.payload.comment }
-  }
-  if (entry.kind === "auto_action") {
-    const at = entry.payload.action?.data?.at
-    const policy = entry.payload.policy === "forfeit" ? "超时判负" : at ? `超时落子 ${at}` : "超时"
-    return { who, text: policy }
+  const who = seat == null ? "席" : roleOf(gameId, seat)
+  const action = entry.payload.action
+  const detail = textOf(action?.data)
+  const type = action?.type
+  if (entry.kind === "action" || entry.kind === "auto_action") {
+    const label =
+      type === "place" ? detail || "落子" :
+      type === "move" ? detail || "走子" :
+      type === "pass" ? "过" :
+      type === "bid" ? detail || "叫分" :
+      type === "play" ? detail || "出牌" :
+      type === "deploy_commit" || type === "deploy" ? "布阵" :
+      type === "exchange_commit" || type === "exchange" ? "换三张" :
+      type === "dingque_commit" || type === "dingque" ? `定缺 ${detail}` :
+      type === "discard" ? `打 ${detail}` :
+      type === "hu" ? "胡" :
+      type === "peng" ? "碰" :
+      type === "gang" ? "杠" :
+      type === "angang" ? `暗杠 ${detail}` :
+      type === "bugang" ? `补杠 ${detail}` :
+      type === "resign" ? "认输" :
+      detail || type || "动作"
+    const text = entry.kind === "auto_action" ? `超时 · ${entry.payload.policy === "forfeit" ? "判负" : label}` : label
+    return { who, text, comment: entry.payload.comment }
   }
   if (entry.kind === "resign") return { who, text: "认输" }
+  if (entry.kind === "reveal") return { who: "揭", text: `揭示 ${entry.payload.reveals?.length ?? 0} 份承诺` }
   if (entry.kind === "result") return { who: "终", text: entry.payload.result?.reason || "结束" }
   if (entry.kind === "genesis") return { who: "开", text: "开局" }
   return { who, text: entry.kind }
@@ -24,9 +52,11 @@ function describe(entry: LogEntry): { who: string; text: string; comment?: strin
 export function MoveLog({
   entries,
   verified,
+  gameId,
 }: {
   entries: LogEntry[]
   verified: Record<number, { signature: boolean; ack: boolean } | undefined>
+  gameId: string
 }) {
   const rows = [...entries].reverse()
   if (rows.length === 0) {
@@ -35,15 +65,15 @@ export function MoveLog({
   return (
     <ol className="font-data max-h-[640px] divide-y divide-border overflow-auto text-sm">
       {rows.map((entry) => {
-        const row = describe(entry)
+        const row = describe(entry, gameId)
         const mark = verified[entry.seq]
         const ok = mark?.signature && mark.ack
         return (
           <li key={entry.seq} className="grid grid-cols-[2.5rem_1.5rem_1fr_auto] items-start gap-2 px-4 py-2.5">
             <span className="text-muted-foreground">{entry.seq}</span>
-            <span className={entry.payload.seat === 0 ? "text-foreground" : "text-primary"}>{row.who}</span>
+            <span className="text-foreground">{row.who}</span>
             <span>
-              <span className="text-foreground">{row.text}</span>
+              <span className="font-sans text-foreground">{row.text}</span>
               {row.comment && <span className="mt-0.5 block font-sans text-xs text-muted-foreground">“{row.comment}”</span>}
             </span>
             <Tooltip>

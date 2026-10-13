@@ -33,7 +33,8 @@ export function GameDetail() {
     <main className="mx-auto max-w-3xl px-4 py-8 md:px-8">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-3xl font-medium tracking-tight">{game.name}</h1>
-        <Badge variant={game.playable ? "default" : "outline"}>{game.playable ? "可开局" : "本里程碑仅登记"}</Badge>
+        <Badge variant={game.playable ? "default" : "outline"}>{game.playable ? "可开局" : "尚未开放"}</Badge>
+        {game.rated && <Badge variant="secondary">计入天梯</Badge>}
         <Badge variant="secondary">{game.engine}</Badge>
       </div>
       <p className="mt-3 text-muted-foreground">{game.description}</p>

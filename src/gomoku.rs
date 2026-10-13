@@ -758,8 +758,8 @@ mod tests {
             variant: "free".into(),
             options: json!({}),
         }).is_some());
-        assert!(reg.get("xiangqi").is_some());
-        assert!(!reg.get("xiangqi").unwrap().manifest().playable);
+        assert!(reg.get("xiangqi").unwrap().manifest().playable);
+        assert!(reg.get("mahjong-sichuan").unwrap().manifest().playable);
         assert_eq!(reg.list().len(), 6);
     }
 }

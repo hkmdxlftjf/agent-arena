@@ -44,6 +44,29 @@ struct GameInfo {
     manifest: Value,
 }
 
+#[allow(dead_code)]
+#[derive(Clone, sqlx::FromRow)]
+struct QueueRow {
+    id: Uuid,
+    agent_id: Uuid,
+    owner_id: Uuid,
+    game_id: String,
+    variant: String,
+    kid: String,
+    rating: f64,
+    enqueued_at: DateTime<Utc>,
+}
+
+fn queue_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+fn window_of(at: DateTime<Utc>) -> f64 {
+    let secs = (Utc::now() - at).num_seconds().max(0) as f64;
+    (100.0 + 50.0 * (secs / 10.0)).min(400.0)
+}
+
 struct Inner {
     pool: PgPool,
     server: ServerKey,
@@ -98,6 +121,15 @@ impl App {
             }),
         };
         app.recover().await;
+        let matcher = app.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if let Err(err) = matcher.matchmake_once().await {
+                    tracing::warn!(error = %err, "matchmaker");
+                }
+            }
+        });
         Ok(app)
     }
 
@@ -321,7 +353,7 @@ impl App {
         let hash = sha256(token.as_bytes());
         let prefix = format!("{}…{}", &token[..16], &token[token.len() - 4..]);
         let id = Uuid::new_v4();
-        let scopes = vec!["play:casual".to_string(), "rooms:create".to_string()];
+        let scopes = vec!["play:casual".to_string(), "play:ranked".to_string(), "rooms:create".to_string()];
         sqlx::query(
             "INSERT INTO agent_tokens (id, agent_id, token_hash, token_prefix, scopes) VALUES ($1,$2,$3,$4,$5)",
         )
@@ -566,7 +598,9 @@ impl App {
             return Err(CallError::new(400, "game_not_playable", "这款游戏已登记，但本里程碑还不能开局"));
         }
         let manifest = registry().get(game_id).unwrap().manifest();
-        let variant = body.get("variant").and_then(|v| v.as_str()).unwrap_or("free");
+        let variant = body.get("variant").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| {
+            manifest.variants.first().map(|v| v.id.clone()).unwrap_or_else(|| "standard".into())
+        });
         if !manifest.variants.iter().any(|v| v.id == variant) {
             return Err(CallError::new(400, "bad_variant", "未知变体"));
         }
@@ -588,6 +622,7 @@ impl App {
         let allow_comments = body.get("allow_comments").and_then(|v| v.as_bool()).unwrap_or(true);
         let kid = self.resolve_key(agent, body.get("kid").and_then(|v| v.as_str())).await?;
         self.ensure_free(agent).await?;
+        self.ensure_not_queued(agent).await?;
         let match_id = Uuid::new_v4();
         let code = self.unique_code().await?;
         let mut tx = self.pool().begin().await.map_err(db_err)?;
@@ -603,7 +638,7 @@ impl App {
         .bind(match_id)
         .bind(info.version_id)
         .bind(game_id)
-        .bind(variant)
+        .bind(&variant)
         .bind(&code)
         .bind(agent.owner_id)
         .bind((time_limit_sec * 1000) as i32)
@@ -641,9 +676,10 @@ impl App {
         let code = code.trim().to_uppercase();
         let kid = self.resolve_key(agent, kid).await?;
         self.ensure_free(agent).await?;
+        self.ensure_not_queued(agent).await?;
         let mut tx = self.pool().begin().await.map_err(db_err)?;
-        let row = sqlx::query_as::<_, (Uuid, String, i64)>(
-            r#"SELECT m.id, m.status,
+        let row = sqlx::query_as::<_, (Uuid, String, String, String, i64)>(
+            r#"SELECT m.id, m.status, m.game_id, m.mode,
                       (SELECT COUNT(*) FROM match_players p WHERE p.match_id = m.id)
                FROM matches m WHERE m.room_code = $1 FOR UPDATE"#,
         )
@@ -651,10 +687,11 @@ impl App {
         .fetch_optional(&mut *tx)
         .await
         .map_err(db_err)?;
-        let Some((match_id, status, n)) = row else {
+        let Some((match_id, status, game_id, mode, n)) = row else {
             return Err(CallError::new(404, "not_found", "找不到这个房间码"));
         };
-        if status != "waiting" || n >= 2 {
+        let max = registry().get(&game_id).map(|g| g.manifest().max_players).unwrap_or(2) as i64;
+        if status != "waiting" || n >= max {
             return Err(CallError::new(409, "room_full", "房间已满或已开始"));
         }
         let already: Option<i16> = sqlx::query_scalar("SELECT seat FROM match_players WHERE match_id = $1 AND agent_id = $2")
@@ -666,28 +703,48 @@ impl App {
         if already.is_some() {
             return Err(CallError::new(409, "already_seated", "你已经在这个房间里"));
         }
-        sqlx::query("INSERT INTO match_players (match_id, seat, agent_id, owner_id, kid) VALUES ($1, 1, $2, $3, $4)")
+        if mode == "ranked" {
+            let same_owner: Option<i16> = sqlx::query_scalar(
+                "SELECT seat FROM match_players WHERE match_id = $1 AND owner_id = $2",
+            )
             .bind(match_id)
+            .bind(agent.owner_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+            if same_owner.is_some() {
+                return Err(CallError::new(409, "same_owner", "排位不能和自己的另一个智能体同桌"));
+            }
+        }
+        let seat = n as i16;
+        sqlx::query("INSERT INTO match_players (match_id, seat, agent_id, owner_id, kid) VALUES ($1, $2, $3, $4, $5)")
+            .bind(match_id)
+            .bind(seat)
             .bind(agent.agent_id)
             .bind(agent.owner_id)
             .bind(&kid)
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
-        sqlx::query("UPDATE matches SET status = 'running', started_at = now() WHERE id = $1")
-            .bind(match_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
+        let starting = n + 1 == max;
+        if starting {
+            sqlx::query("UPDATE matches SET status = 'running', started_at = now() WHERE id = $1")
+                .bind(match_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
         tx.commit().await.map_err(db_err)?;
-        spawn_room(self.pool().clone(), self.server().clone(), &self.inner.hub, match_id)
-            .await
-            .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
+        if starting {
+            spawn_room(self.pool().clone(), self.server().clone(), &self.inner.hub, match_id)
+                .await
+                .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
+        }
         Ok(json!({
             "match_id": match_id,
             "room_code": code,
-            "seat": 1,
-            "status": "running",
+            "seat": seat,
+            "status": if starting { "running" } else { "waiting" },
         }))
     }
 
@@ -711,6 +768,18 @@ impl App {
         .await
         .map_err(db_err)?;
         kid.ok_or_else(|| CallError::new(400, "no_key", "先注册签名公钥，才能入座"))
+    }
+
+    async fn ensure_not_queued(&self, agent: &AgentCtx) -> Result<(), CallError> {
+        let queued: Option<Uuid> = sqlx::query_scalar("SELECT id FROM match_queue WHERE agent_id = $1")
+            .bind(agent.agent_id)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?;
+        if queued.is_some() {
+            return Err(CallError::new(409, "queued", "这个智能体正在排位队列里"));
+        }
+        Ok(())
     }
 
     async fn ensure_free(&self, agent: &AgentCtx) -> Result<(), CallError> {
@@ -804,7 +873,7 @@ impl App {
         }
     }
 
-    pub async fn make_move(&self, agent: &AgentCtx, match_id: Uuid, envelope: Value) -> Result<Value, CallError> {
+    pub async fn make_move(&self, agent: &AgentCtx, match_id: Uuid, envelope: Value, private: Option<Value>) -> Result<Value, CallError> {
         self.touch(agent.agent_id).await;
         self.ensure_actor(match_id).await?;
         let Some(tx) = self.inner.hub.sender(match_id) else {
@@ -813,6 +882,7 @@ impl App {
         roundtrip(&tx, |reply| Cmd::Move {
             agent_id: agent.agent_id,
             envelope,
+            private,
             reply,
         })
         .await
@@ -829,6 +899,295 @@ impl App {
             reply,
         })
         .await
+    }
+
+    pub async fn join_queue(&self, agent: &AgentCtx, body: &Value) -> Result<Value, CallError> {
+        if !agent.scopes.iter().any(|s| s == "play:ranked") {
+            return Err(CallError::new(403, "ranked_forbidden", "这个令牌没有排位权限"));
+        }
+        if let Some(found) = self.ranked_seat(agent.agent_id).await? {
+            return Ok(found);
+        }
+        let game_id = body.get("game").and_then(|v| v.as_str()).unwrap_or("gomoku");
+        let info = self.inner.games.get(game_id).ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
+        if !info.playable {
+            return Err(CallError::new(400, "game_not_playable", "这款游戏还不能排位"));
+        }
+        let manifest = registry().get(game_id).unwrap().manifest();
+        if !manifest.rated {
+            return Err(CallError::new(400, "unrated", "这款游戏不计入天梯"));
+        }
+        let variant = body.get("variant").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| {
+            manifest.variants.first().map(|v| v.id.clone()).unwrap_or_else(|| "standard".into())
+        });
+        if !manifest.variants.iter().any(|v| v.id == variant) {
+            return Err(CallError::new(400, "bad_variant", "未知变体"));
+        }
+        self.ensure_free(agent).await?;
+        let kid = self.resolve_key(agent, body.get("kid").and_then(|v| v.as_str())).await?;
+        let rating = self.display_rating(agent.agent_id, game_id).await?;
+        let id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO match_queue (id, agent_id, owner_id, game_id, variant, kid, rating)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)
+               ON CONFLICT (agent_id) DO UPDATE SET game_id = EXCLUDED.game_id, variant = EXCLUDED.variant,
+                 kid = EXCLUDED.kid, rating = EXCLUDED.rating, enqueued_at = now()"#,
+        )
+        .bind(id)
+        .bind(agent.agent_id)
+        .bind(agent.owner_id)
+        .bind(game_id)
+        .bind(&variant)
+        .bind(&kid)
+        .bind(rating)
+        .execute(self.pool())
+        .await
+        .map_err(db_err)?;
+        self.matchmake_once().await.map_err(|err| CallError::new(500, "matchmaker", err.to_string()))?;
+        if let Some(found) = self.ranked_seat(agent.agent_id).await? {
+            return Ok(found);
+        }
+        Ok(json!({"status": "queued", "game_id": game_id, "variant": variant, "rating": rating}))
+    }
+
+    pub async fn queue_status(&self, agent: &AgentCtx) -> Result<Value, CallError> {
+        if let Some(found) = self.ranked_seat(agent.agent_id).await? {
+            return Ok(found);
+        }
+        let row = sqlx::query_as::<_, (String, String, f64, chrono::DateTime<Utc>)>(
+            "SELECT game_id, variant, rating, enqueued_at FROM match_queue WHERE agent_id = $1",
+        )
+        .bind(agent.agent_id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        let Some((game_id, variant, rating, at)) = row else {
+            return Ok(json!({"status": "idle"}));
+        };
+        Ok(json!({
+            "status": "queued",
+            "game_id": game_id,
+            "variant": variant,
+            "rating": rating,
+            "waiting_ms": (Utc::now() - at).num_milliseconds().max(0),
+        }))
+    }
+
+    async fn ranked_seat(&self, agent_id: Uuid) -> Result<Option<Value>, CallError> {
+        let row = sqlx::query_as::<_, (Uuid, i16, String)>(
+            r#"SELECT m.id, mp.seat, m.game_id FROM match_players mp
+               JOIN matches m ON m.id = mp.match_id
+               WHERE mp.agent_id = $1 AND m.mode = 'ranked' AND m.status = 'running'
+               ORDER BY m.started_at DESC NULLS LAST LIMIT 1"#,
+        )
+        .bind(agent_id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok(row.map(|(id, seat, game_id)| json!({"status": "matched", "match_id": id, "seat": seat, "game_id": game_id})))
+    }
+
+    async fn display_rating(&self, agent_id: Uuid, game_id: &str) -> Result<f64, CallError> {
+        let rating: Option<f64> = sqlx::query_scalar(
+            "SELECT rating FROM ratings WHERE agent_id = $1 AND game_id = $2 AND season = '2026'",
+        )
+        .bind(agent_id)
+        .bind(game_id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok(rating.unwrap_or(1500.0))
+    }
+
+    pub async fn matchmake_once(&self) -> anyhow::Result<()> {
+        let _guard = queue_lock().lock().await;
+        let rows = sqlx::query_as::<_, QueueRow>(
+            r#"SELECT id, agent_id, owner_id, game_id, variant, kid, rating, enqueued_at
+               FROM match_queue ORDER BY enqueued_at"#,
+        )
+        .fetch_all(self.pool())
+        .await?;
+        let mut groups: HashMap<(String, String), Vec<QueueRow>> = HashMap::new();
+        for row in rows {
+            groups.entry((row.game_id.clone(), row.variant.clone())).or_default().push(row);
+        }
+        for ((game_id, variant), waiting) in groups {
+            let Some(game) = registry().get(&game_id) else { continue };
+            let manifest = game.manifest();
+            let need = manifest.max_players as usize;
+            if waiting.len() < need { continue };
+            let mut used = vec![false; waiting.len()];
+            let mut batch = Vec::new();
+            for i in 0..waiting.len() {
+                if used[i] { continue; }
+                let mut group = vec![i];
+                let mut owners = vec![waiting[i].owner_id];
+                let mut rest: Vec<usize> = (0..waiting.len()).filter(|j| *j != i && !used[*j]).collect();
+                rest.sort_by(|&a, &b| {
+                    let da = (waiting[a].rating - waiting[i].rating).abs();
+                    let db = (waiting[b].rating - waiting[i].rating).abs();
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                for j in rest {
+                    if owners.contains(&waiting[j].owner_id) { continue; }
+                    let fits = group.iter().all(|&g| {
+                        let diff = (waiting[g].rating - waiting[j].rating).abs();
+                        diff <= window_of(waiting[g].enqueued_at).max(window_of(waiting[j].enqueued_at))
+                    });
+                    if fits {
+                        owners.push(waiting[j].owner_id);
+                        group.push(j);
+                        if group.len() == need { break; }
+                    }
+                }
+                if group.len() == need {
+                    for g in &group { used[*g] = true; }
+                    let picked: Vec<QueueRow> = group.into_iter().map(|i| waiting[i].clone()).collect();
+                    batch.push(picked);
+                }
+            }
+            let _ = waiting;
+            for picked in batch {
+                self.start_ranked(&game_id, &variant, &manifest, &picked).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn start_ranked(&self, game_id: &str, variant: &str, manifest: &crate::game::Manifest, picked: &[QueueRow]) -> anyhow::Result<()> {
+        let info = self.inner.games.get(game_id).ok_or_else(|| anyhow::anyhow!("missing game"))?;
+        let match_id = Uuid::new_v4();
+        let mut tx = self.pool().begin().await?;
+        sqlx::query(
+            r#"INSERT INTO matches (
+                 id, game_version_id, game_id, variant, mode, created_by,
+                 time_limit_ms, timeout_policy, max_consecutive_timeouts, grace_ms,
+                 allow_comments, rules_hash, server_kid, status, started_at
+               ) VALUES (
+                 $1,$2,$3,$4,'ranked',$5,$6,$7,$8,2000,false,$9,$10,'running', now()
+               )"#,
+        )
+        .bind(match_id)
+        .bind(info.version_id)
+        .bind(game_id)
+        .bind(variant)
+        .bind(picked[0].owner_id)
+        .bind(manifest.default_time.per_action_ms as i32)
+        .bind(manifest.timeout_policy.as_str())
+        .bind(manifest.default_time.max_consecutive_timeouts as i32)
+        .bind(&info.rules_hash)
+        .bind(&self.server().kid)
+        .execute(&mut *tx)
+        .await?;
+        for (seat, player) in picked.iter().enumerate() {
+            sqlx::query("INSERT INTO match_players (match_id, seat, agent_id, owner_id, kid) VALUES ($1,$2,$3,$4,$5)")
+                .bind(match_id)
+                .bind(seat as i16)
+                .bind(player.agent_id)
+                .bind(player.owner_id)
+                .bind(&player.kid)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM match_queue WHERE agent_id = $1")
+                .bind(player.agent_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        spawn_room(self.pool().clone(), self.server().clone(), &self.inner.hub, match_id).await?;
+        Ok(())
+    }
+
+    pub async fn leaderboard(&self, game: &str) -> Result<Value, CallError> {
+        crate::rating::leaderboard(self.pool(), game).await.map_err(|err| CallError::new(500, "leaderboard", err.to_string()))
+    }
+
+    pub async fn user_profile(&self, handle: &str) -> Result<Value, CallError> {
+        let user = sqlx::query_as::<_, (Uuid, String, chrono::DateTime<Utc>)>(
+            "SELECT id, handle, created_at FROM users WHERE handle = $1",
+        )
+        .bind(handle)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| CallError::new(404, "not_found", "没有这个用户"))?;
+        let agents = sqlx::query_as::<_, (Uuid, String, Option<String>)>(
+            "SELECT id, name, model_label FROM agents WHERE owner_id = $1 ORDER BY created_at",
+        )
+        .bind(user.0)
+        .fetch_all(self.pool())
+        .await
+        .map_err(db_err)?;
+        let mut listed = Vec::new();
+        for (id, name, model) in agents {
+            let ratings = self.agent_ratings(id).await?;
+            listed.push(json!({"id": id, "name": name, "model_label": model, "ratings": ratings}));
+        }
+        let recent = self.recent_matches_for_user(user.0).await?;
+        Ok(json!({"user": {"handle": user.1, "created_at": user.2.timestamp_millis()}, "agents": listed, "recent": recent}))
+    }
+
+    pub async fn agent_profile(&self, id: Uuid) -> Result<Value, CallError> {
+        let row = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>, String)>(
+            r#"SELECT a.id, a.name, a.description, a.model_label, u.handle
+               FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = $1"#,
+        )
+        .bind(id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| CallError::new(404, "not_found", "没有这个智能体"))?;
+        let ratings = self.agent_ratings(id).await?;
+        let recent = self.recent_matches_for_agent(id).await?;
+        Ok(json!({
+            "agent": {"id": row.0, "name": row.1, "description": row.2, "model_label": row.3, "handle": row.4},
+            "ratings": ratings,
+            "recent": recent,
+        }))
+    }
+
+    async fn agent_ratings(&self, id: Uuid) -> Result<Vec<Value>, CallError> {
+        let rows = sqlx::query_as::<_, (String, f64, f64, i32, i32, String)>(
+            "SELECT game_id, rating, rd, games, wins, system FROM ratings WHERE agent_id = $1 AND season = '2026' ORDER BY game_id",
+        )
+        .bind(id)
+        .fetch_all(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(|(game, rating, rd, games, wins, system)| json!({
+            "game_id": game, "rating": rating.round(), "rd": rd.round(), "games": games, "wins": wins,
+            "system": system, "provisional": crate::rating::provisional(games, rd),
+        })).collect())
+    }
+
+    async fn recent_matches_for_user(&self, user: Uuid) -> Result<Vec<Value>, CallError> {
+        let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, Option<f64>, i16)>(
+            r#"SELECT m.id, m.game_id, m.status, m.end_reason, mp.score, mp.seat
+               FROM match_players mp JOIN matches m ON m.id = mp.match_id
+               WHERE mp.owner_id = $1 ORDER BY m.created_at DESC LIMIT 12"#,
+        )
+        .bind(user)
+        .fetch_all(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(|(id, game, status, reason, score, seat)| json!({
+            "id": id, "game_id": game, "status": status, "end_reason": reason, "score": score, "seat": seat,
+        })).collect())
+    }
+
+    async fn recent_matches_for_agent(&self, agent: Uuid) -> Result<Vec<Value>, CallError> {
+        let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, Option<f64>, i16)>(
+            r#"SELECT m.id, m.game_id, m.status, m.end_reason, mp.score, mp.seat
+               FROM match_players mp JOIN matches m ON m.id = mp.match_id
+               WHERE mp.agent_id = $1 ORDER BY m.created_at DESC LIMIT 12"#,
+        )
+        .bind(agent)
+        .fetch_all(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(|(id, game, status, reason, score, seat)| json!({
+            "id": id, "game_id": game, "status": status, "end_reason": reason, "score": score, "seat": seat,
+        })).collect())
     }
 
     async fn ensure_actor(&self, match_id: Uuid) -> Result<(), CallError> {
@@ -1010,7 +1369,7 @@ async fn bootstrap_games(pool: &PgPool) -> anyhow::Result<HashMap<String, GameIn
         sqlx::query(
             r#"INSERT INTO games (id, builtin, name, description, ranked_eligible)
                VALUES ($1, true, $2, $3, $4)
-               ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description"#,
+               ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, ranked_eligible = EXCLUDED.ranked_eligible"#,
         )
         .bind(&manifest.id)
         .bind(&manifest.name)

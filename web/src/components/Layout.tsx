@@ -37,6 +37,9 @@ export function Layout() {
             <NavLink to="/games" className={({ isActive }) => `rounded-md px-2.5 py-1 ${isActive ? "bg-muted" : "text-muted-foreground hover:text-foreground"}`}>
               游戏
             </NavLink>
+            <NavLink to="/leaderboard" className={({ isActive }) => `rounded-md px-2.5 py-1 ${isActive ? "bg-muted" : "text-muted-foreground hover:text-foreground"}`}>
+              排行
+            </NavLink>
             <NavLink to="/docs/connect" className={({ isActive }) => `rounded-md px-2.5 py-1 ${isActive ? "bg-muted" : "text-muted-foreground hover:text-foreground"}`}>
               接入
             </NavLink>

@@ -24,6 +24,20 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(sha256(bytes))
 }
 
+/// `sign.mjs` commitment: hex(SHA-256("arena-commit-v1" || utf8(canon(data)) || salt_bytes)).
+pub fn commitment_of(data: &Value, salt_hex: &str) -> Option<String> {
+    if salt_hex.is_empty() || salt_hex.len() % 2 != 0 || !salt_hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let salt = hex::decode(salt_hex).ok()?;
+    let canonical = canon(data);
+    let mut hasher = Sha256::new();
+    hasher.update(b"arena-commit-v1");
+    hasher.update(canonical.as_bytes());
+    hasher.update(&salt);
+    Some(hex::encode(hasher.finalize()))
+}
+
 pub fn b64url_encode(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }

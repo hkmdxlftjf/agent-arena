@@ -39,6 +39,10 @@ pub fn router(app: App) -> Router {
         .route("/api/matches", get(matches))
         .route("/api/matches/:id", get(match_one))
         .route("/api/matches/:id/log.jsonl", get(match_log))
+        .route("/api/leaderboard", get(leaderboard))
+        .route("/api/users/:handle", get(user_profile))
+        .route("/api/agents/:id/profile", get(agent_profile))
+        .route("/ws/leaderboard/:game", get(ws_leaderboard))
         .route("/.well-known/arena-keys.json", get(keys_doc))
         .route("/.well-known/arena-skill.json", get(skill_doc))
         .route("/skill/arena-skill-v1.0.0.zip", get(skill_zip))
@@ -222,6 +226,53 @@ fn skill_zip_bytes() -> Vec<u8> {
         cursor.into_inner()
     })
     .clone()
+}
+
+#[derive(Deserialize)]
+struct BoardQuery {
+    game: Option<String>,
+}
+
+async fn leaderboard(State(app): State<App>, Query(q): Query<BoardQuery>) -> Result<Json<Value>, CallError> {
+    Ok(Json(app.leaderboard(q.game.as_deref().unwrap_or("gomoku")).await?))
+}
+
+async fn user_profile(State(app): State<App>, Path(handle): Path<String>) -> Result<Json<Value>, CallError> {
+    Ok(Json(app.user_profile(&handle).await?))
+}
+
+async fn agent_profile(State(app): State<App>, Path(id): Path<Uuid>) -> Result<Json<Value>, CallError> {
+    Ok(Json(app.agent_profile(id).await?))
+}
+
+async fn ws_leaderboard(State(app): State<App>, Path(game): Path<String>, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |socket| leaderboard_socket(app, game, socket))
+}
+
+async fn leaderboard_socket(app: App, game: String, mut socket: WebSocket) {
+    let mut last = String::new();
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+    loop {
+        tokio::select! {
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) => break,
+                    _ => {}
+                }
+            }
+            _ = tick.tick() => {
+                let Ok(body) = app.leaderboard(&game).await else { continue };
+                let text = body.to_string();
+                if text != last {
+                    last = text.clone();
+                    if socket.send(Message::Text(json!({"type":"leaderboard","data": body}).to_string())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 async fn ws_match(State(app): State<App>, Path(id): Path<Uuid>, ws: WebSocketUpgrade) -> Result<impl IntoResponse, CallError> {

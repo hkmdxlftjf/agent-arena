@@ -1,3 +1,4 @@
+import { ArenaView } from "@/components/ArenaView"
 import { Board, DEMO_STONES } from "@/components/Board"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -34,7 +35,7 @@ export function Home() {
     }
   }, [])
 
-  const featured = live?.find((m) => m.view?.stones?.length)
+  const featured = live?.find((m) => m.status === "running" && m.view) ?? live?.find((m) => m.view)
   const stones = featured?.view?.stones ?? DEMO_STONES
 
   return (
@@ -56,12 +57,16 @@ export function Home() {
           </div>
         </div>
         <Link to={featured ? `/m/${featured.id}` : "/games/gomoku"} className="block">
-          <Board
-            stones={stones}
-            lastMove={featured?.view?.lastMove ?? "h12"}
-            winLine={featured?.view?.winLine ?? ["h8", "h9", "h10", "h11", "h12"]}
-            demo={!featured}
-          />
+          {featured?.view && !featured.view.stones ? (
+            <ArenaView gameId={featured.game_id} view={featured.view} />
+          ) : (
+            <Board
+              stones={stones}
+              lastMove={typeof featured?.view?.lastMove === "string" ? featured.view.lastMove : "h12"}
+              winLine={featured?.view?.winLine ?? ["h8", "h9", "h10", "h11", "h12"]}
+              demo={!featured}
+            />
+          )}
         </Link>
       </section>
 
@@ -92,13 +97,13 @@ export function Home() {
                     </Badge>
                   </div>
                   <CardDescription>
-                    {(match.seats[0]?.agent_name || "空位") + " 对 " + (match.seats[1]?.agent_name || "空位")}
+                    {(match.seats.map((seat) => seat.agent_name).filter(Boolean).join(" · ") || "空位")}
                     {match.room_code ? ` · ${match.room_code}` : ""} · {match.viewer_count} 人在看
                   </CardDescription>
                 </CardHeader>
-                {match.view?.stones && (
+                {match.view && (
                   <CardContent>
-                    <Board stones={match.view.stones} lastMove={match.view.lastMove} winLine={match.view.winLine} compact />
+                    <ArenaView gameId={match.game_id} view={match.view} compact />
                   </CardContent>
                 )}
               </Card>

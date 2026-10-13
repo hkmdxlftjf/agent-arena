@@ -44,7 +44,7 @@ async fn move_at(app: &App, ctx: &arena::app::AgentCtx, home: &Path, match_id: U
     let state = app.get_state(ctx, match_id).await.unwrap();
     assert!(state["signing_request"].is_object(), "expected a turn, got {state}");
     let envelope = common::sign(home, &state["signing_request"], Some(&place(at)), None);
-    let accepted = app.make_move(ctx, match_id, envelope.clone()).await.unwrap();
+    let accepted = app.make_move(ctx, match_id, envelope.clone(), None).await.unwrap();
     assert_eq!(accepted["accepted"], json!(true), "{accepted}");
     envelope
 }
@@ -57,9 +57,6 @@ async fn signed_gomoku_log_verifies(pool: PgPool) {
 
     let (black, black_home) = seat(&app, "black@example.com", "black_agent", "黑子").await;
     let (white, white_home) = seat(&app, "white@example.com", "white_agent", "白子").await;
-
-    let denied = app.create_room(&black, &json!({"game": "xiangqi"})).await.unwrap_err();
-    assert_eq!(denied.code, "game_not_playable");
 
     let room = app
         .create_room(&black, &json!({"game": "gomoku", "variant": "free", "time_limit_sec": 60}))
@@ -83,7 +80,7 @@ async fn signed_gomoku_log_verifies(pool: PgPool) {
         (&black, black_home.as_path(), "h12"),
     ];
     let first = move_at(&app, script[0].0, script[0].1, match_id, script[0].2).await;
-    let again = app.make_move(script[0].0, match_id, first).await.unwrap();
+    let again = app.make_move(script[0].0, match_id, first, None).await.unwrap();
     assert_eq!(again["accepted"], json!(true), "{again}");
     assert_eq!(again["idempotent"], json!(true), "{again}");
     for (ctx, home, at) in script.into_iter().skip(1) {
@@ -101,4 +98,27 @@ async fn signed_gomoku_log_verifies(pool: PgPool) {
     assert_eq!(report["ok"], json!(true), "{report}\n{log}");
     assert_eq!(report["agent_sigs"], json!(9), "{report}");
     assert!(report["acks"].as_i64().unwrap() >= 11, "{report}");
+}
+
+#[sqlx::test]
+async fn ranked_queue_updates_glicko(pool: PgPool) {
+    let dir = common::fresh_home("ranked");
+    let server = ServerKey::load_or_create(&dir).unwrap();
+    let app = App::boot(pool, server, cfg(&dir)).await.unwrap();
+    let (black, _) = seat(&app, "rb@example.com", "rank_black", "排位黑").await;
+    let (white, _) = seat(&app, "rw@example.com", "rank_white", "排位白").await;
+    let first = app.join_queue(&black, &json!({"game": "gomoku", "variant": "free"})).await.unwrap();
+    assert_eq!(first["status"], json!("queued"), "{first}");
+    let second = app.join_queue(&white, &json!({"game": "gomoku", "variant": "free"})).await.unwrap();
+    assert_eq!(second["status"], json!("matched"), "{second}");
+    let match_id = Uuid::parse_str(second["match_id"].as_str().unwrap()).unwrap();
+    let loser = if second["seat"] == 1 { &white } else { &black };
+    let resigned = app.resign(loser, match_id).await.unwrap();
+    assert_eq!(resigned["accepted"], json!(true), "{resigned}");
+    let board = app.leaderboard("gomoku").await.unwrap();
+    let rows = board["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{board}");
+    let ratings: Vec<f64> = rows.iter().map(|r| r["rating"].as_f64().unwrap()).collect();
+    assert!(ratings.iter().any(|r| *r > 1500.0), "{ratings:?}");
+    assert!(ratings.iter().any(|r| *r < 1500.0), "{ratings:?}");
 }

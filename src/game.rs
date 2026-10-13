@@ -243,9 +243,11 @@ impl Registry {
             Arc::new(move |cfg| gomoku_board.board_spec(cfg)),
         );
         reg.games.push(gomoku);
-        for stub in stubs() {
-            reg.games.push(Arc::new(stub));
-        }
+        reg.games.push(Arc::new(crate::xiangqi::Xiangqi));
+        reg.games.push(Arc::new(crate::go::Go));
+        reg.games.push(Arc::new(crate::junqi::Junqi));
+        reg.games.push(Arc::new(crate::doudizhu::DouDizhu));
+        reg.games.push(Arc::new(crate::mahjong::Mahjong));
         reg
     }
 
@@ -262,180 +264,26 @@ impl Registry {
     }
 }
 
-fn stubs() -> Vec<Stub> {
-    vec![
-        Stub::new(
-            "xiangqi",
-            "中国象棋",
-            "标准 9×10，九宫、河界。本里程碑仅登记清单，规则尚未实现。",
-            vec![Trait::Board],
-            2,
-            2,
-            "xiangqi",
-            TimeoutPolicy::Forfeit,
-            vec![TimeoutPolicy::Forfeit],
-            "# 中国象棋\n\n尚未实现。",
-        ),
-        Stub::new(
-            "go",
-            "围棋",
-            "中国规则数子法。默认 9×9。本里程碑仅登记清单。",
-            vec![Trait::Board, Trait::MultiPhase],
-            2,
-            2,
-            "grid-board",
-            TimeoutPolicy::AutoPass,
-            vec![TimeoutPolicy::AutoPass, TimeoutPolicy::Forfeit],
-            "# 围棋\n\n尚未实现。",
-        ),
-        Stub::new(
-            "junqi",
-            "军棋",
-            "两人暗棋。布阵同时进行，碰子由裁判判定。本里程碑仅登记清单。",
-            vec![Trait::Board, Trait::HiddenInfo, Trait::MultiPhase],
-            2,
-            2,
-            "junqi",
-            TimeoutPolicy::AutoPass,
-            vec![TimeoutPolicy::AutoPass, TimeoutPolicy::AutoAction, TimeoutPolicy::Forfeit],
-            "# 军棋\n\n尚未实现。",
-        ),
-        Stub::new(
-            "doudizhu",
-            "斗地主",
-            "三人扑克，叫分与牌型。本里程碑仅登记清单。",
-            vec![
-                Trait::Card,
-                Trait::HiddenInfo,
-                Trait::Chance,
-                Trait::Teams,
-                Trait::MultiPhase,
-            ],
-            3,
-            3,
-            "card-table",
-            TimeoutPolicy::AutoPass,
-            vec![TimeoutPolicy::AutoPass, TimeoutPolicy::AutoAction],
-            "# 斗地主\n\n尚未实现。",
-        ),
-        Stub::new(
-            "mahjong-sichuan",
-            "麻将（四川·血战到底）",
-            "四人 108 张，定缺、碰杠胡。本里程碑仅登记清单。",
-            vec![
-                Trait::Tile,
-                Trait::HiddenInfo,
-                Trait::Chance,
-                Trait::MultiPhase,
-            ],
-            4,
-            4,
-            "mahjong-table",
-            TimeoutPolicy::AutoAction,
-            vec![TimeoutPolicy::AutoAction, TimeoutPolicy::AutoPass],
-            "# 四川麻将\n\n尚未实现。",
-        ),
-    ]
-}
-
-struct Stub {
-    manifest: Manifest,
-}
-
-impl Stub {
-    fn new(
-        id: &str,
-        name: &str,
-        description: &str,
-        traits: Vec<Trait>,
-        min: u8,
-        max: u8,
-        renderer: &str,
-        policy: TimeoutPolicy,
-        allowed: Vec<TimeoutPolicy>,
-        rules: &str,
-    ) -> Self {
-        Self {
-            manifest: Manifest {
-                id: id.into(),
-                name: name.into(),
-                version: "0.0.0".into(),
-                min_players: min,
-                max_players: max,
-                traits,
-                variants: vec![Variant {
-                    id: "std".into(),
-                    name: "标准".into(),
-                    options: None,
-                }],
-                default_time: TimeControl {
-                    per_action_ms: 60_000,
-                    max_consecutive_timeouts: 3,
-                    grace_ms: 2_000,
-                },
-                timeout_policy: policy,
-                allowed_timeout_policies: allowed,
-                action_schema: json!({"type": "object"}),
-                rules_markdown: rules.into(),
-                renderer: renderer.into(),
-                rated: false,
-                engine: "native".into(),
-                description: description.into(),
-                playable: false,
-            },
-        }
-    }
-}
-
-impl Game for Stub {
-    fn manifest(&self) -> Manifest {
-        self.manifest.clone()
-    }
-    fn setup(&self, _: &Config, _: &mut dyn ArenaRng) -> Result<(Value, Vec<Value>), GameError> {
-        Err(GameError("游戏尚未在本里程碑实现".into()))
-    }
-    fn to_act(&self, _: &Value) -> Vec<Seat> {
-        Vec::new()
-    }
-    fn view(&self, _: &Value, _: &Viewer) -> Result<Value, GameError> {
-        Err(GameError("游戏尚未在本里程碑实现".into()))
-    }
-    fn legal_actions(&self, _: &Value, _: Seat) -> Result<Vec<Value>, GameError> {
-        Err(GameError("游戏尚未在本里程碑实现".into()))
-    }
-    fn apply(
-        &self,
-        _: &Value,
-        _: Seat,
-        _: &Value,
-        _: &mut dyn ArenaRng,
-    ) -> Result<(Value, Vec<Value>), GameError> {
-        Err(GameError("游戏尚未在本里程碑实现".into()))
-    }
-    fn is_terminal(&self, _: &Value) -> bool {
-        true
-    }
-    fn result(&self, _: &Value) -> Result<GameResult, GameError> {
-        Err(GameError("游戏尚未在本里程碑实现".into()))
-    }
-    fn timeout_decision(
-        &self,
-        _: &Value,
-        _: Seat,
-        policy: TimeoutPolicy,
-        _: &mut dyn ArenaRng,
-    ) -> Result<TimeoutDecision, GameError> {
-        Ok(TimeoutDecision {
-            policy,
-            action: None,
-        })
-    }
-}
-
 pub fn registry() -> &'static Registry {
     use std::sync::OnceLock;
     static REG: OnceLock<Registry> = OnceLock::new();
     REG.get_or_init(Registry::builtin)
+}
+
+pub fn ranking_from_scores(scores: &[f64]) -> Vec<Vec<Seat>> {
+    let mut seats: Vec<Seat> = (0..scores.len() as Seat).collect();
+    seats.sort_by(|a, b| scores[*b as usize].partial_cmp(&scores[*a as usize]).unwrap_or(std::cmp::Ordering::Equal));
+    let mut groups: Vec<Vec<Seat>> = Vec::new();
+    for seat in seats {
+        if let Some(last) = groups.last_mut() {
+            if (scores[last[0] as usize] - scores[seat as usize]).abs() < 1e-9 {
+                last.push(seat);
+                continue;
+            }
+        }
+        groups.push(vec![seat]);
+    }
+    groups
 }
 
 pub fn result_value(r: &GameResult) -> Value {
@@ -450,9 +298,13 @@ pub fn result_value(r: &GameResult) -> Value {
             }
         })
         .collect();
-    json!({
+    let mut value = json!({
         "scores": scores,
         "ranking": r.ranking,
         "reason": r.reason,
-    })
+    });
+    if let Some(teams) = &r.teams {
+        value["teams"] = json!(teams);
+    }
+    value
 }
