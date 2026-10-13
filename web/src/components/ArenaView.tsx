@@ -1,11 +1,12 @@
 import { Board } from "@/components/Board"
+import { GridBoard } from "@/components/GridBoard"
 import { CardTable } from "@/components/CardTable"
 import { GoBoard } from "@/components/GoBoard"
 import { JunqiBoard } from "@/components/JunqiBoard"
 import { MahjongTable } from "@/components/MahjongTable"
 import { XiangqiBoard } from "@/components/XiangqiBoard"
 import { roleOf } from "@/lib/games"
-import type { GameView, Trick } from "@/lib/types"
+import type { GameView, GridCell, JunqiCell, Trick } from "@/lib/types"
 
 export function ArenaView({ gameId, view, compact = false }: { gameId: string; view: GameView | null; compact?: boolean }) {
   if (!view) {
@@ -26,7 +27,7 @@ export function ArenaView({ gameId, view, compact = false }: { gameId: string; v
   }
   if (renderer === "junqi" || gameId === "junqi") {
     const last = view.last && !("cards" in view.last) ? view.last : null
-    return <JunqiBoard cells={view.cells} last={last} phase={view.phase} compact={compact} />
+    return <JunqiBoard cells={view.cells as JunqiCell[] | undefined} last={last} phase={view.phase} compact={compact} />
   }
   if (renderer === "card-table" || gameId === "doudizhu") {
     const last = view.last && "cards" in view.last ? (view.last as Trick) : null
@@ -60,6 +61,10 @@ export function ArenaView({ gameId, view, compact = false }: { gameId: string; v
       />
     )
   }
+  if (renderer === "grid-board") {
+    const cells = (view.cells ?? []).filter((cell): cell is GridCell => !("zone" in cell))
+    return <GridBoard size={view.size || 3} cells={cells} compact={compact} />
+  }
   if (view.stones) {
     return (
       <Board
@@ -71,8 +76,8 @@ export function ArenaView({ gameId, view, compact = false }: { gameId: string; v
     )
   }
   return (
-    <div className="grid h-64 place-items-center rounded-2xl border border-dashed border-border text-sm text-muted-foreground">
-      这一局面还没有可画的棋盘
-    </div>
+    <pre className="max-h-[32rem] overflow-auto rounded-2xl border border-border bg-white p-4 text-xs leading-5 text-neutral-800">
+      {JSON.stringify(view, null, 2)}
+    </pre>
   )
 }

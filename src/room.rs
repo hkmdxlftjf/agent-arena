@@ -2,7 +2,7 @@
 
 use crate::chain::{decode_hex, decode_sig, payload_hash_hex, Chain};
 use crate::crypto::{commitment_of, domain, domain_ok, json_i64, now_ms, verify_value, ServerKey};
-use crate::game::{result_value, Game, TimeoutPolicy, Viewer};
+use crate::game::{result_value, Game, Manifest, TimeoutPolicy, Viewer};
 use crate::gomoku::force_terminal;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -164,6 +164,7 @@ struct MatchRow {
     seed_commit: Option<String>,
     result: Option<Value>,
     end_reason: Option<String>,
+    game_version_id: Uuid,
     game_version: String,
     game_name: String,
 }
@@ -271,7 +272,7 @@ impl Engine {
             r#"SELECT m.game_id, m.variant, m.mode, m.room_code, m.time_limit_ms, m.timeout_policy,
                       m.max_consecutive_timeouts, m.grace_ms, m.allow_comments, m.rules_hash, m.status,
                       m.state, m.open_decisions, m.seed, m.seed_commit, m.result, m.end_reason,
-                      gv.version AS game_version, g.name AS game_name
+                      m.game_version_id, gv.version AS game_version, g.name AS game_name
                FROM matches m
                JOIN game_versions gv ON gv.id = m.game_version_id
                JOIN games g ON g.id = m.game_id
@@ -282,9 +283,7 @@ impl Engine {
         .await?
         .ok_or_else(|| anyhow::anyhow!("match not found"))?;
 
-        let game = crate::game::registry()
-            .get(&row.game_id)
-            .ok_or_else(|| anyhow::anyhow!("unknown game {}", row.game_id))?;
+        let game = load_game(&pool, &row.game_id, row.game_version_id).await?;
 
         let prows = sqlx::query_as::<_, PlayerRow>(
             r#"SELECT mp.seat, mp.agent_id, mp.kid, mp.timeouts, mp.forfeited, mp.score,
@@ -1272,8 +1271,28 @@ fn seat_role(game: &str, seat: i32) -> &'static str {
         "junqi" => if seat == 0 { "南" } else { "北" },
         "doudizhu" => match seat { 0 => "甲", 1 => "乙", _ => "丙" },
         "mahjong-sichuan" => match seat { 0 => "东", 1 => "南", 2 => "西", _ => "北" },
-        _ => "席",
+        _ => match seat {
+            0 => "甲",
+            1 => "乙",
+            2 => "丙",
+            3 => "丁",
+            _ => "席",
+        },
     }
+}
+
+async fn load_game(pool: &PgPool, game_id: &str, version_id: Uuid) -> anyhow::Result<Arc<dyn Game>> {
+    if let Some(game) = crate::game::registry().get(game_id) {
+        return Ok(game);
+    }
+    let row = sqlx::query_as::<_, (Option<String>, Value)>("SELECT source, manifest FROM game_versions WHERE id = $1")
+        .bind(version_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("missing rules {game_id}"))?;
+    let source = row.0.ok_or_else(|| anyhow::anyhow!("uploaded rules {game_id} have no source"))?;
+    let manifest: Manifest = serde_json::from_value(row.1)?;
+    Ok(Arc::new(crate::sandbox::JsGame::from_stored(source, manifest)))
 }
 
 fn phase_of(status: &str) -> &'static str {

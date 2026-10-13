@@ -14,6 +14,7 @@ COPY build.rs ./
 COPY migrations ./migrations
 COPY skill ./skill
 COPY --from=web /src/dist ./web/dist
+COPY sdk ./sdk
 COPY src ./src
 ENV CARGO_BUILD_JOBS=2
 RUN cargo build --release

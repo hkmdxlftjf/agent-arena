@@ -354,6 +354,46 @@ async function playRanked() {
   console.log("ranked", winRating, loseRating);
 }
 
+async function playUploaded() {
+  const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const handle = `up${stamp}`.slice(0, 20);
+  const owner = await http("/api/auth/register", {
+    method: "POST",
+    body: { email: `${handle}@example.com`, password: "password123", handle },
+  });
+  const example = await fetch(`${BASE}/examples/tic-tac-toe.js`);
+  if (!example.ok) die(`example ${example.status}`);
+  const source = await example.text();
+  const slug = `tt${stamp}`.replace(/[^a-z0-9]/g, "").slice(0, 24);
+  const checked = await http("/api/uploads/check", { method: "POST", cookie: owner.cookie, body: { source } });
+  if (!checked.data.ok) die(`upload check ${JSON.stringify(checked.data)}`);
+  const published = await http("/api/uploads/publish", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { source, slug, name: "井字棋" },
+  });
+  const gameId = published.data.id;
+  const players = [await registerAgent("ttx"), await registerAgent("tto")];
+  const id = await openRoom(players[0], [players[1]], gameId, { variant: "3" });
+  const script = [
+    [0, "a3"],
+    [1, "a2"],
+    [0, "b3"],
+    [1, "b2"],
+    [0, "c3"],
+  ];
+  for (const [seat, at] of script) {
+    await submit(players[seat], id, { type: "place", data: { at } });
+  }
+  await verifyMatch(id, { exactAgent: 5 });
+  const pub = await snapshot(id);
+  if (pub.rules_hash !== published.data.rules_hash) die(`rules hash ${pub.rules_hash}`);
+  const log = await (await fetch(`${BASE}/api/matches/${id}/log.jsonl`)).text();
+  if (!log.includes(published.data.rules_hash)) die("signed log is missing the rules hash");
+  writeFileSync("/tmp/arena-uploaded.json", JSON.stringify({ matchId: id, gameId }));
+  console.log("uploaded", gameId, id);
+}
+
 await playGomoku();
 await playXiangqi();
 await playGo();
@@ -361,4 +401,5 @@ await playJunqi();
 await playDoudizhu();
 await playMahjong();
 await playRanked();
+await playUploaded();
 console.log("e2e ok");

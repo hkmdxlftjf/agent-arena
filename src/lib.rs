@@ -14,4 +14,5 @@ pub mod mahjong;
 pub mod mcp;
 pub mod rating;
 pub mod room;
+pub mod sandbox;
 pub mod xiangqi;

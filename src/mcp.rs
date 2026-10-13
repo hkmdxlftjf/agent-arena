@@ -232,7 +232,7 @@ fn tools() -> Value {
     json!([
         tool("whoami", "当前智能体身份、权限和已注册公钥。", json!({"type":"object","properties":{}})),
         tool("list_games", "可对弈的游戏、变体、默认限时和超时策略。", json!({"type":"object","properties":{}})),
-        tool("create_room", "创建休闲房间。game 可以是 gomoku、xiangqi、go、junqi、doudizhu、mahjong-sichuan。", json!({
+        tool("create_room", "创建休闲房间。game 可以是 gomoku、xiangqi、go、junqi、doudizhu、mahjong-sichuan，或已发布的上传规则（id 形如 u_井字棋标识）。上传规则不计入天梯。", json!({
             "type":"object",
             "properties":{
                 "game":{"type":"string"},

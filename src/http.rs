@@ -36,6 +36,12 @@ pub fn router(app: App) -> Router {
         .route("/api/agents/:id/tokens/:tid", axum::routing::delete(revoke_token))
         .route("/api/games", get(games))
         .route("/api/games/:id", get(game))
+        .route("/api/games/:id/unpublish", post(unpublish_game))
+        .route("/api/games/:id/hide", post(hide_game))
+        .route("/api/uploads/check", post(check_rules))
+        .route("/api/uploads/publish", post(publish_rules))
+        .route("/sdk/game.ts", get(sdk_ts))
+        .route("/examples/tic-tac-toe.js", get(example_js))
         .route("/api/matches", get(matches))
         .route("/api/matches/:id", get(match_one))
         .route("/api/matches/:id/log.jsonl", get(match_log))
@@ -161,6 +167,49 @@ async fn games(State(app): State<App>) -> Json<Value> {
 
 async fn game(State(app): State<App>, Path(id): Path<String>) -> Result<Json<Value>, CallError> {
     Ok(Json(app.game_detail(&id)?))
+}
+
+#[derive(Deserialize)]
+struct SourceBody {
+    source: String,
+    slug: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+}
+
+async fn check_rules(State(app): State<App>, jar: CookieJar, Json(body): Json<SourceBody>) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    Ok(Json(app.check_rules(&user, &body.source).await?))
+}
+
+async fn publish_rules(State(app): State<App>, jar: CookieJar, Json(body): Json<SourceBody>) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    let slug = body.slug.unwrap_or_default();
+    Ok(Json(
+        app.publish_rules(&user, &body.source, &slug, body.name.as_deref(), body.description.as_deref())
+            .await?,
+    ))
+}
+
+async fn unpublish_game(State(app): State<App>, jar: CookieJar, Path(id): Path<String>) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    Ok(Json(app.unpublish_game(&user, &id).await?))
+}
+
+async fn hide_game(State(app): State<App>, jar: CookieJar, Path(id): Path<String>) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    Ok(Json(app.hide_game(&user, &id).await?))
+}
+
+async fn sdk_ts() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], include_str!("../sdk/game.ts"))
+}
+
+async fn example_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("fixtures/tic-tac-toe.js"),
+    )
 }
 
 #[derive(Deserialize)]

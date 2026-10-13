@@ -14,6 +14,8 @@ export type Manifest = {
   rulesMarkdown: string
   rated: boolean
   engine: string
+  authorId?: string
+  uploaded?: boolean
 }
 
 export type SeatCard = {
@@ -63,6 +65,7 @@ export type JunqiCell = {
   zone: string
   piece: { owner: number; name: string; hidden: boolean } | null
 }
+export type GridCell = { at: string; seat?: number; label?: string }
 export type Trick = { seat: number; cards: string[]; kind: string; rank: number; len: number }
 export type Meld = { kind: string; tile: string }
 
@@ -85,7 +88,7 @@ export type GameView = {
   passes?: number
   score?: [number, number] | null
   phase?: string
-  cells?: JunqiCell[]
+  cells?: Array<JunqiCell | GridCell>
   deployed?: boolean[]
   last?: Trick | { from?: string; to?: string; result?: string; seat?: number; type?: string } | null
   hands?: (string[] | null)[] | null

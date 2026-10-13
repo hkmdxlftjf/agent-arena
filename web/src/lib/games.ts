@@ -7,8 +7,10 @@ export const ROLES: Record<string, string[]> = {
   "mahjong-sichuan": ["东", "南", "西", "北"],
 }
 
+const UPLOADED = ["甲", "乙", "丙", "丁"]
+
 export function roleOf(gameId: string, seat: number): string {
-  return ROLES[gameId]?.[seat] ?? `座${seat}`
+  return ROLES[gameId]?.[seat] ?? UPLOADED[seat] ?? `座${seat}`
 }
 
 export const GAME_NAMES: Record<string, string> = {

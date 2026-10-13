@@ -13,7 +13,7 @@ use rand::{Rng, RngCore};
 use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -44,6 +44,24 @@ struct GameInfo {
     manifest: Value,
 }
 
+#[derive(Clone)]
+#[allow(dead_code)]
+struct UploadInfo {
+    version_id: Uuid,
+    version: String,
+    rules_hash: String,
+    playable: bool,
+    manifest: Value,
+    author_id: Uuid,
+}
+
+struct LiveGame {
+    version_id: Uuid,
+    rules_hash: String,
+    playable: bool,
+    manifest: crate::game::Manifest,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, sqlx::FromRow)]
 struct QueueRow {
@@ -72,6 +90,7 @@ struct Inner {
     server: ServerKey,
     cfg: Config,
     games: HashMap<String, GameInfo>,
+    uploads: RwLock<HashMap<String, UploadInfo>>,
     hub: Hub,
 }
 
@@ -111,12 +130,14 @@ impl App {
         .execute(&pool)
         .await?;
         let games = bootstrap_games(&pool).await?;
+        let uploads = load_uploads(&pool).await?;
         let app = Self {
             inner: Arc::new(Inner {
                 pool,
                 server,
                 cfg,
                 games,
+                uploads: RwLock::new(uploads),
                 hub: Hub::new(),
             }),
         };
@@ -451,16 +472,39 @@ impl App {
     }
 
     pub fn list_games(&self) -> Vec<Value> {
-        registry()
+        let mut games: Vec<Value> = registry()
             .list()
             .into_iter()
             .map(|m| serde_json::to_value(&m).unwrap_or(json!({})))
-            .collect()
+            .collect();
+        let uploads = self.inner.uploads.read().unwrap_or_else(|err| err.into_inner());
+        for info in uploads.values() {
+            if info.playable {
+                games.push(info.manifest.clone());
+            }
+        }
+        games
     }
 
     pub fn game_detail(&self, id: &str) -> Result<Value, CallError> {
-        let info = self.inner.games.get(id).ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
+        if let Some(info) = self.inner.games.get(id) {
+            return Ok(info.manifest.clone());
+        }
+        let uploads = self.inner.uploads.read().unwrap_or_else(|err| err.into_inner());
+        let info = uploads.get(id).filter(|info| info.playable).ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
         Ok(info.manifest.clone())
+    }
+
+    fn resolve_game(&self, game_id: &str) -> Result<LiveGame, CallError> {
+        let (version_id, rules_hash, playable, manifest) = if let Some(info) = self.inner.games.get(game_id) {
+            (info.version_id, info.rules_hash.clone(), info.playable, info.manifest.clone())
+        } else {
+            let uploads = self.inner.uploads.read().unwrap_or_else(|err| err.into_inner());
+            let info = uploads.get(game_id).ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
+            (info.version_id, info.rules_hash.clone(), info.playable, info.manifest.clone())
+        };
+        let manifest = serde_json::from_value(manifest).map_err(|err| CallError::new(500, "manifest", err.to_string()))?;
+        Ok(LiveGame { version_id, rules_hash, playable, manifest })
     }
 
     pub async fn key_challenge(&self, agent: &AgentCtx) -> Result<Value, CallError> {
@@ -589,15 +633,16 @@ impl App {
 
     pub async fn create_room(&self, agent: &AgentCtx, body: &Value) -> Result<Value, CallError> {
         let game_id = body.get("game").and_then(|v| v.as_str()).unwrap_or("gomoku");
-        let info = self
-            .inner
-            .games
-            .get(game_id)
-            .ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
-        if !info.playable {
-            return Err(CallError::new(400, "game_not_playable", "这款游戏已登记，但本里程碑还不能开局"));
+        let live = self.resolve_game(game_id)?;
+        if !live.playable {
+            let message = if live.manifest.engine == "js-sandbox" {
+                "这款规则已下架，不能开局"
+            } else {
+                "这款游戏已登记，但本里程碑还不能开局"
+            };
+            return Err(CallError::new(400, "game_not_playable", message));
         }
-        let manifest = registry().get(game_id).unwrap().manifest();
+        let manifest = live.manifest;
         let variant = body.get("variant").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| {
             manifest.variants.first().map(|v| v.id.clone()).unwrap_or_else(|| "standard".into())
         });
@@ -636,7 +681,7 @@ impl App {
                )"#,
         )
         .bind(match_id)
-        .bind(info.version_id)
+        .bind(live.version_id)
         .bind(game_id)
         .bind(&variant)
         .bind(&code)
@@ -645,7 +690,7 @@ impl App {
         .bind(policy)
         .bind(max_to as i32)
         .bind(allow_comments)
-        .bind(&info.rules_hash)
+        .bind(&live.rules_hash)
         .bind(&self.server().kid)
         .execute(&mut *tx)
         .await
@@ -690,7 +735,7 @@ impl App {
         let Some((match_id, status, game_id, mode, n)) = row else {
             return Err(CallError::new(404, "not_found", "找不到这个房间码"));
         };
-        let max = registry().get(&game_id).map(|g| g.manifest().max_players).unwrap_or(2) as i64;
+        let max = self.resolve_game(&game_id).map(|g| i64::from(g.manifest.max_players)).unwrap_or(2);
         if status != "waiting" || n >= max {
             return Err(CallError::new(409, "room_full", "房间已满或已开始"));
         }
@@ -909,11 +954,11 @@ impl App {
             return Ok(found);
         }
         let game_id = body.get("game").and_then(|v| v.as_str()).unwrap_or("gomoku");
-        let info = self.inner.games.get(game_id).ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
-        if !info.playable {
+        let live = self.resolve_game(game_id)?;
+        if !live.playable {
             return Err(CallError::new(400, "game_not_playable", "这款游戏还不能排位"));
         }
-        let manifest = registry().get(game_id).unwrap().manifest();
+        let manifest = live.manifest;
         if !manifest.rated {
             return Err(CallError::new(400, "unrated", "这款游戏不计入天梯"));
         }
@@ -1400,6 +1445,275 @@ async fn bootstrap_games(pool: &PgPool) -> anyhow::Result<HashMap<String, GameIn
                 name: manifest.name,
                 playable: manifest.playable,
                 manifest: value,
+            },
+        );
+    }
+    Ok(out)
+}
+
+impl App {
+    pub async fn check_rules(&self, user: &User, source: &str) -> Result<Value, CallError> {
+        if source.len() > crate::sandbox::MAX_SOURCE {
+            return Err(CallError::new(400, "too_large", "规则源码不能超过 256KB"));
+        }
+        self.charge_quota(user.id, false).await?;
+        let report = crate::sandbox::validate(source).map_err(|err| CallError::new(400, "rejected", err.0))?;
+        Ok(serde_json::to_value(&report).unwrap_or(json!({})))
+    }
+
+    pub async fn publish_rules(
+        &self,
+        user: &User,
+        source: &str,
+        slug: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<Value, CallError> {
+        let slug = slug.trim().to_lowercase();
+        if !valid_slug(&slug) {
+            return Err(CallError::new(400, "bad_slug", "标识需为 3–32 位小写字母、数字或连字符，并以字母开头"));
+        }
+        if source.len() > crate::sandbox::MAX_SOURCE {
+            return Err(CallError::new(400, "too_large", "规则源码不能超过 256KB"));
+        }
+        let id = format!("u_{slug}");
+        if registry().get(&id).is_some() {
+            return Err(CallError::new(400, "reserved", "这个标识和内置游戏冲突"));
+        }
+        self.charge_quota(user.id, false).await?;
+        let report = crate::sandbox::validate(source).map_err(|err| CallError::new(400, "rejected", err.0))?;
+        if !report.ok {
+            return Err(CallError::new(400, "rejected", "校验没通过，先看检查结果再发布"));
+        }
+        let public = report.manifest.clone().ok_or_else(|| CallError::new(400, "rejected", "没有读到 manifest"))?;
+        let existing = sqlx::query_as::<_, (Option<Uuid>, String, bool)>(
+            "SELECT author_id, moderation, builtin FROM games WHERE id = $1",
+        )
+        .bind(&id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        let version = if let Some((author, moderation, builtin)) = &existing {
+            if *builtin {
+                return Err(CallError::new(400, "reserved", "这个标识和内置游戏冲突"));
+            }
+            if *author != Some(user.id) {
+                return Err(CallError::new(403, "forbidden", "这款规则属于别的账号"));
+            }
+            if moderation == "hidden" {
+                return Err(CallError::new(403, "hidden", "管理员已隐藏这款规则，不能再发布"));
+            }
+            let prev: Option<String> = sqlx::query_scalar(
+                "SELECT version FROM game_versions WHERE game_id = $1 ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(&id)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?;
+            bump_version(prev.as_deref())
+        } else {
+            "1.0.0".into()
+        };
+        self.charge_quota(user.id, true).await?;
+        let (_manifest, mut stored) = crate::sandbox::publish_manifest(public, &id, &version, name, description)
+            .map_err(|err| CallError::new(400, "rejected", err.0))?;
+        stored["authorId"] = json!(user.id);
+        stored["uploaded"] = json!(true);
+        let hash = crate::sandbox::rules_hash(&stored, source);
+        let source_sha = sha256_hex(source.as_bytes());
+        let version_id = Uuid::new_v4();
+        let game_name = stored["name"].as_str().unwrap_or(&id).to_string();
+        let game_desc = stored["description"].as_str().unwrap_or("").to_string();
+        let mut tx = self.pool().begin().await.map_err(db_err)?;
+        if existing.is_none() {
+            sqlx::query(
+                r#"INSERT INTO games (id, builtin, name, description, visibility, ranked_eligible, author_id, moderation)
+                   VALUES ($1, false, $2, $3, 'public', false, $4, 'visible')"#,
+            )
+            .bind(&id)
+            .bind(&game_name)
+            .bind(&game_desc)
+            .bind(user.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        } else {
+            let updated = sqlx::query(
+                r#"UPDATE games SET name = $2, description = $3, visibility = 'public'
+                   WHERE id = $1 AND author_id = $4 AND builtin = false AND moderation = 'visible'"#,
+            )
+            .bind(&id)
+            .bind(&game_name)
+            .bind(&game_desc)
+            .bind(user.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+            if updated.rows_affected() == 0 {
+                return Err(CallError::new(403, "hidden", "管理员已隐藏这款规则，不能再发布"));
+            }
+        }
+        sqlx::query(
+            r#"INSERT INTO game_versions (id, game_id, version, engine, manifest, rules_hash, source, source_sha256)
+               VALUES ($1, $2, $3, 'js-sandbox', $4, $5, $6, $7)"#,
+        )
+        .bind(version_id)
+        .bind(&id)
+        .bind(&version)
+        .bind(&stored)
+        .bind(&hash)
+        .bind(source)
+        .bind(&source_sha)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        self.remember_upload(UploadInfo {
+            version_id,
+            version: version.clone(),
+            rules_hash: hash.clone(),
+            playable: true,
+            manifest: stored,
+            author_id: user.id,
+        });
+        Ok(json!({
+            "id": id,
+            "version": version,
+            "rules_hash": hash,
+            "name": game_name,
+        }))
+    }
+
+    pub async fn unpublish_game(&self, user: &User, id: &str) -> Result<Value, CallError> {
+        let row = sqlx::query_as::<_, (Option<Uuid>, bool)>("SELECT author_id, builtin FROM games WHERE id = $1")
+            .bind(id)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?;
+        let Some((author, builtin)) = row else {
+            return Err(CallError::new(404, "not_found", "没有这款规则"));
+        };
+        if builtin {
+            return Err(CallError::new(400, "builtin", "内置游戏不能下架"));
+        }
+        if author != Some(user.id) {
+            return Err(CallError::new(403, "forbidden", "只有作者能下架"));
+        }
+        sqlx::query("UPDATE games SET visibility = 'unpublished' WHERE id = $1")
+            .bind(id)
+            .execute(self.pool())
+            .await
+            .map_err(db_err)?;
+        self.mark_upload_unplayable(id);
+        Ok(json!({"ok": true}))
+    }
+
+    pub async fn hide_game(&self, user: &User, id: &str) -> Result<Value, CallError> {
+        if user.role != "admin" {
+            return Err(CallError::new(403, "forbidden", "只有管理员能隐藏规则"));
+        }
+        let updated = sqlx::query(
+            "UPDATE games SET moderation = 'hidden', visibility = 'unpublished' WHERE id = $1 AND builtin = false",
+        )
+        .bind(id)
+        .execute(self.pool())
+        .await
+        .map_err(db_err)?;
+        if updated.rows_affected() == 0 {
+            return Err(CallError::new(404, "not_found", "没有可隐藏的上传规则"));
+        }
+        self.mark_upload_unplayable(id);
+        Ok(json!({"ok": true}))
+    }
+
+    fn remember_upload(&self, info: UploadInfo) {
+        let id = info.manifest.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let mut map = self.inner.uploads.write().unwrap_or_else(|err| err.into_inner());
+        map.insert(id, info);
+    }
+
+    fn mark_upload_unplayable(&self, id: &str) {
+        let mut map = self.inner.uploads.write().unwrap_or_else(|err| err.into_inner());
+        if let Some(info) = map.get_mut(id) {
+            info.playable = false;
+            if let Some(obj) = info.manifest.as_object_mut() {
+                obj.insert("playable".into(), json!(false));
+            }
+        }
+    }
+
+    async fn charge_quota(&self, user_id: Uuid, publish: bool) -> Result<(), CallError> {
+        sqlx::query("INSERT INTO upload_quotas (user_id, day) VALUES ($1, CURRENT_DATE) ON CONFLICT DO NOTHING")
+            .bind(user_id)
+            .execute(self.pool())
+            .await
+            .map_err(db_err)?;
+        let (column, limit, message) = if publish {
+            ("publishes", 10, "今天的发布次数已用完（每天 10 次）")
+        } else {
+            ("checks", 40, "今天的校验次数已用完（每天 40 次）")
+        };
+        let sql = format!(
+            "UPDATE upload_quotas SET {column} = {column} + 1 WHERE user_id = $1 AND day = CURRENT_DATE AND {column} < $2 RETURNING {column}"
+        );
+        let updated: Option<i32> = sqlx::query_scalar(&sql)
+            .bind(user_id)
+            .bind(limit)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?;
+        if updated.is_none() {
+            return Err(CallError::new(429, "quota", message));
+        }
+        Ok(())
+    }
+}
+
+fn bump_version(prev: Option<&str>) -> String {
+    let Some(prev) = prev else {
+        return "1.0.0".into();
+    };
+    let mut parts = prev.split('.');
+    let major = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(1);
+    let minor = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+    format!("{major}.{minor}.{}", patch + 1)
+}
+
+fn valid_slug(slug: &str) -> bool {
+    let bytes = slug.as_bytes();
+    (3..=32).contains(&bytes.len())
+        && bytes.first().is_some_and(|c| c.is_ascii_lowercase())
+        && bytes.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
+async fn load_uploads(pool: &PgPool) -> anyhow::Result<HashMap<String, UploadInfo>> {
+    let rows = sqlx::query_as::<_, (String, Uuid, String, String, Value, String, String, Option<Uuid>)>(
+        r#"SELECT g.id, gv.id, gv.version, gv.rules_hash, gv.manifest, g.visibility, g.moderation, g.author_id
+           FROM games g
+           JOIN LATERAL (
+             SELECT id, version, rules_hash, manifest
+             FROM game_versions
+             WHERE game_id = g.id
+             ORDER BY created_at DESC
+             LIMIT 1
+           ) gv ON true
+           WHERE g.builtin = false AND g.author_id IS NOT NULL"#,
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut out = HashMap::new();
+    for (id, version_id, version, rules_hash, manifest, visibility, moderation, author_id) in rows {
+        let Some(author_id) = author_id else { continue };
+        out.insert(
+            id,
+            UploadInfo {
+                version_id,
+                version,
+                rules_hash,
+                playable: visibility == "public" && moderation == "visible",
+                manifest,
+                author_id,
             },
         );
     }
