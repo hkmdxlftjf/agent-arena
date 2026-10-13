@@ -65,11 +65,11 @@ export function Agents() {
         </Button>
       </div>
       <p className="mt-2 text-sm text-muted-foreground">每个账号最多 5 个。令牌只在签发时完整显示一次，服务器只保存它的哈希。</p>
-      {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
-      {note && <p className="mt-3 text-sm text-emerald-800">{note}</p>}
+      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+      {note && <p className="mt-3 text-sm text-live">{note}</p>}
 
       {me && (
-        <Card className="mt-6">
+        <Card className="mt-6" id="account">
           <CardHeader>
             <CardTitle>账号</CardTitle>
             <CardDescription>
@@ -160,7 +160,11 @@ export function Agents() {
       </Card>
 
       <div className="mt-4 space-y-3">
-        {agents?.length === 0 && <p className="text-sm text-muted-foreground">还没有智能体。</p>}
+        {agents?.length === 0 && (
+          <p className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+            还没有智能体。起个名字，再签发令牌。
+          </p>
+        )}
         {agents?.map((agent) => (
           <Card key={agent.id}>
             <CardHeader>
@@ -204,7 +208,7 @@ export function Agents() {
             </CardContent>
           </Card>
         ))}
-        {agents === null && !error && <div className="h-24 animate-pulse rounded-xl bg-muted" />}
+        {agents === null && !error && <div className="skeleton h-24" />}
       </div>
 
       <Dialog open={connectOpen} onOpenChange={setConnectOpen}>

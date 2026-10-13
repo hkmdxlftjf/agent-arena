@@ -100,7 +100,7 @@ export function MatchPage() {
       </main>
     )
   }
-  if (!snap) return <main className="mx-auto max-w-5xl px-4 py-8"><div className="h-96 animate-pulse rounded-2xl bg-muted" /></main>
+  if (!snap) return <main className="mx-auto max-w-5xl px-4 py-8"><div className="skeleton h-96" /></main>
 
   const acting = new Set(snap.to_act ?? [])
   const checked = Object.values(verified)
@@ -157,8 +157,8 @@ export function MatchPage() {
         </div>
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,720px)_320px]">
-        <section>
+      <div className="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,720px)_minmax(0,320px)]">
+        <section className="min-w-0">
           <div className={ordered.length > 2 ? "mb-3 grid gap-2 sm:grid-cols-2" : ""}>
             {(ordered.length > 2 ? ordered : head).map((seat) => (
               <SeatBar
@@ -173,7 +173,7 @@ export function MatchPage() {
               />
             ))}
           </div>
-          <div className={acting.size > 0 && snap.status === "running" ? "rounded-2xl ring-1 ring-primary/40" : ""}>
+          <div className={`board-frame ${acting.size > 0 && snap.status === "running" ? "ring-2 ring-primary/50" : ""}`}>
             <ArenaView gameId={snap.game_id} view={snap.view} />
           </div>
           {ordered.length <= 2 && foot && (
@@ -193,12 +193,12 @@ export function MatchPage() {
           {(snap.status === "finished" || snap.status === "expired" || snap.status === "aborted") && (
             <p className="mt-3 text-sm">
               终局：{reasonText(snap.result?.reason || snap.end_reason)}
-              {snap.seed ? <span className="font-data mt-1 block text-xs text-muted-foreground">seed {snap.seed}</span> : null}
+              {snap.seed ? <span className="font-data mt-1 block break-all text-xs text-muted-foreground">seed {snap.seed}</span> : null}
             </p>
           )}
         </section>
-        <aside className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="border-b border-border px-4 py-3 text-sm font-medium">动作日志</div>
+        <aside className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
+          <div className="border-b border-border px-4 py-3 text-sm font-medium">时间线</div>
           <MoveLog entries={snap.entries ?? []} verified={verified} gameId={snap.game_id} />
         </aside>
       </div>
@@ -224,8 +224,8 @@ function SeatBar({
   score?: number | null
 }) {
   return (
-    <div className={`my-3 flex items-center gap-3 rounded-xl border px-3 py-2 ${active ? "border-primary shadow-[0_0_0_1px_var(--primary),0_0_20px_-8px_var(--primary)]" : "border-border"}`}>
-      <span className="grid size-8 place-items-center rounded-full border border-zinc-300 bg-white text-xs">{role}</span>
+    <div className={`my-3 flex items-center gap-3 rounded-2xl border bg-card px-3 py-2 shadow-[var(--shadow-card)] ${active ? "border-primary" : "border-border"}`}>
+      <span className="grid size-9 place-items-center rounded-full bg-secondary text-xs font-medium">{role.slice(0, 1)}</span>
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">
           {seat?.agent_id ? <Link to={`/a/${seat.agent_id}`} className="hover:text-primary">{seat.agent_name}</Link> : "空位"}

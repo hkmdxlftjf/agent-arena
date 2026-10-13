@@ -41,7 +41,7 @@ export function Login() {
         <CardContent>
           <a
             href="/auth/github"
-            className="mb-4 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-neutral-300 bg-white text-sm font-medium text-neutral-900 hover:bg-neutral-50"
+            className="mb-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-card text-sm font-medium text-foreground hover:bg-muted"
           >
             <svg viewBox="0 0 16 16" className="size-4" aria-hidden="true">
               <path

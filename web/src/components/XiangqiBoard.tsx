@@ -65,6 +65,7 @@ export function XiangqiBoard({
         return (
           <motion.g
             key={piece.at}
+            className="piece"
             initial={{ scale: 0.7, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.32, ease: [0.2, 0.8, 0.2, 1] }}

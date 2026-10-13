@@ -11,7 +11,7 @@ function face(card: string): { rank: string; suit: string; red: boolean } {
 
 function PlayingCard({ card, hidden = false, index = 0 }: { card?: string; hidden?: boolean; index?: number }) {
   if (hidden || !card) {
-    return <span className="inline-block h-12 w-8 rounded-md border border-[#312e81] bg-gradient-to-br from-[#4338ca] to-[#312e81] shadow-sm" />
+    return <span className="piece inline-block h-12 w-8 rounded-md border border-[#243038] bg-gradient-to-br from-[#3d4c55] to-[#243038]" />
   }
   const f = face(card)
   return (
@@ -19,7 +19,7 @@ function PlayingCard({ card, hidden = false, index = 0 }: { card?: string; hidde
       initial={{ y: 10, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.28, delay: Math.min(index, 8) * 0.02 }}
-      className={`inline-flex h-14 w-10 flex-col items-center justify-center rounded-md border bg-white shadow-sm ${f.red ? "border-red-200 text-red-600" : "border-zinc-200 text-zinc-900"}`}
+      className={`piece inline-flex h-14 w-10 flex-col items-center justify-center rounded-md border bg-[#fffaf3] ${f.red ? "border-[#e7c4b8] text-[#8f2d2a]" : "border-[#e0d3c2] text-[#1c1612]"}`}
     >
       <span className="font-data text-sm leading-none font-medium">{f.rank}</span>
       <span className="text-xs leading-none">{f.suit}</span>
@@ -87,14 +87,14 @@ export function CardTable({
 }) {
   const seats = [1, 2, 0]
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-[#fafafa] p-3 dark:bg-zinc-950">
+    <div className="space-y-3 rounded-2xl border border-border bg-[#f6efe4] p-3 dark:bg-[#1a1612]">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>{phase === "bid" ? `叫分中 · 当前 ${bid || "未叫"}` : phase === "play" ? "出牌" : "终局"}</span>
         <span>倍数 ×{multiplier}</span>
         {landlord != null && <span>地主 {roles[landlord] || landlord}</span>}
       </div>
       {seats.map((seat) => (
-        <div key={seat} className="rounded-xl border border-border bg-white p-2">
+        <div key={seat} className="rounded-xl border border-border bg-card p-2">
           <p className="mb-1 text-xs text-muted-foreground">
             {roles[seat] || `座${seat}`}
             {landlord === seat ? " · 地主" : ""}

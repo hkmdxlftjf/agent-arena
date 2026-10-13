@@ -44,7 +44,7 @@ export function Board({
       )}
       <svg
         viewBox={`0 0 ${size} ${size}`}
-        className="h-auto w-full rounded-2xl border border-border bg-[#fafafa] dark:bg-zinc-900"
+        className="paper-board h-auto w-full rounded-2xl border border-[#c4a574]"
         role="img"
         aria-label="五子棋棋盘"
       >
@@ -62,7 +62,7 @@ export function Board({
           FILES.map((file, c) => {
             const p = xy(c, 0)
             return (
-              <text key={file} x={p.x} y={size - 8} textAnchor="middle" className="fill-zinc-500 text-[11px]">
+              <text key={file} x={p.x} y={size - 8} textAnchor="middle" fill="#6b6258" fontSize="11">
                 {file}
               </text>
             )
@@ -71,7 +71,7 @@ export function Board({
           Array.from({ length: n }, (_, r) => {
             const p = xy(0, r)
             return (
-              <text key={r} x={10} y={p.y + 4} textAnchor="middle" className="fill-zinc-500 text-[11px]">
+              <text key={r} x={10} y={p.y + 4} textAnchor="middle" fill="#6b6258" fontSize="11">
                 {r + 1}
               </text>
             )
@@ -91,6 +91,7 @@ export function Board({
           return (
             <motion.g
               key={stone.at}
+              className="piece"
               initial={{ scale: 0.55, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ duration: 0.32, ease: [0.2, 0.8, 0.2, 1] }}
@@ -105,7 +106,7 @@ export function Board({
                 strokeWidth={compact ? 1 : 1.5}
               />
               {stone.at === lastMove && (
-                <circle cx={p.x} cy={p.y} r={compact ? 2 : 3.5} fill={stone.seat === 0 ? "#ffffff" : "#6246ea"} />
+                <circle cx={p.x} cy={p.y} r={compact ? 2 : 3.5} fill={stone.seat === 0 ? "#ffffff" : "#8f2d2a"} />
               )}
               {win && (
                 <motion.circle
@@ -113,7 +114,7 @@ export function Board({
                   cy={p.y}
                   r={radius + (compact ? 2 : 4)}
                   fill="none"
-                  stroke="#6246ea"
+                  stroke="#8f2d2a"
                   strokeWidth={compact ? 1.4 : 2}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: [0.2, 1, 0.55] }}

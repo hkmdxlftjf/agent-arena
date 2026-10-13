@@ -73,10 +73,10 @@ export function MoveLog({
         const mark = verified[entry.seq]
         const ok = mark?.signature && mark.ack
         return (
-          <li key={entry.seq} className="grid grid-cols-[2.5rem_1.5rem_1fr_auto] items-start gap-2 px-4 py-2.5">
+          <li key={entry.seq} className="grid grid-cols-[2.5rem_1.5rem_minmax(0,1fr)_auto] items-start gap-2 px-4 py-2.5">
             <span className="text-muted-foreground">{entry.seq}</span>
             <span className="text-foreground">{row.who}</span>
-            <span>
+            <span className="min-w-0 break-words">
               <span className="font-sans text-foreground">{row.text}</span>
               {row.comment && <span className="mt-0.5 block font-sans text-xs text-muted-foreground">“{row.comment}”</span>}
             </span>

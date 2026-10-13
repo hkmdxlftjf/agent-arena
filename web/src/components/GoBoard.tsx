@@ -72,6 +72,7 @@ export function GoBoard({
         return (
           <motion.g
             key={stone.at}
+            className="piece"
             initial={{ scale: 0.4, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.32, ease: [0.2, 0.8, 0.2, 1] }}
@@ -79,7 +80,7 @@ export function GoBoard({
           >
             <circle cx={p.x} cy={p.y} r={radius} fill={black ? "#1a1a1a" : "#f7f4ef"} stroke={black ? "#1a1a1a" : "#cfc6b8"} />
             {stone.at.toUpperCase() === lastMove?.toUpperCase() && (
-              <circle cx={p.x} cy={p.y} r={radius * 0.28} fill={black ? "#f4f4f5" : "#6246ea"} />
+              <circle cx={p.x} cy={p.y} r={radius * 0.28} fill={black ? "#f4f4f5" : "#8f2d2a"} />
             )}
           </motion.g>
         )

@@ -1,3 +1,4 @@
+import { GameMark } from "@/components/GameMark"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -51,6 +52,7 @@ export function GameDetail() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 md:px-8">
       <div className="flex flex-wrap items-center gap-2">
+        <GameMark id={game.id} className="size-11" />
         <h1 className="text-3xl font-medium tracking-tight">{game.name}</h1>
         <Badge variant={game.playable ? "default" : "outline"}>{game.playable ? "可开局" : "尚未开放"}</Badge>
         {game.rated && <Badge variant="secondary">计入天梯</Badge>}

@@ -1,3 +1,4 @@
+import { GameMark } from "@/components/GameMark"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -42,10 +43,13 @@ export function Games() {
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {games?.map((game) => (
           <Link key={game.id} to={`/games/${game.id}`}>
-            <Card className="h-full transition-transform hover:-translate-y-0.5">
+            <Card className="h-full">
               <CardHeader>
                 <div className="flex items-center justify-between gap-2">
-                  <CardTitle>{game.name}</CardTitle>
+                  <div className="flex items-center gap-3">
+                    <GameMark id={game.id} />
+                    <CardTitle>{game.name}</CardTitle>
+                  </div>
                   <Badge variant={game.playable ? "default" : "outline"}>{game.playable ? "可开局" : "已登记"}</Badge>
                 </div>
                 <CardDescription>{game.description}</CardDescription>
@@ -63,7 +67,7 @@ export function Games() {
             </Card>
           </Link>
         ))}
-        {games === null && !error && <div className="h-32 animate-pulse rounded-xl bg-muted" />}
+        {games === null && !error && <div className="skeleton h-32" />}
       </div>
     </main>
   )

@@ -104,7 +104,7 @@ export function ArenaView({ gameId, view, compact = false }: { gameId: string; v
     )
   }
   return (
-    <pre className="max-h-[32rem] overflow-auto rounded-2xl border border-border bg-white p-4 text-xs leading-5 text-neutral-800">
+    <pre className="code-block font-data max-h-[32rem]">
       {JSON.stringify(view, null, 2)}
     </pre>
   )

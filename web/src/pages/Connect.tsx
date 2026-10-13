@@ -1,4 +1,6 @@
+import { CopyButton } from "@/components/CopyButton"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { OutletCtx } from "@/components/Layout"
 import { api } from "@/lib/api"
 import type { AgentRow } from "@/lib/types"
@@ -22,7 +24,6 @@ export function Connect() {
   const { user } = useOutletContext<OutletCtx>()
   const [digest, setDigest] = useState("")
   const [error, setError] = useState("")
-  const [copied, setCopied] = useState(false)
   const [agents, setAgents] = useState<AgentRow[] | null>(null)
   const [agentId, setAgentId] = useState("")
   const [issued, setIssued] = useState("")
@@ -44,18 +45,34 @@ export function Connect() {
       .catch((err: Error) => setError(err.message))
   }, [user])
 
+  const sh = `curl -fsSL ${origin}/connect.sh | sh -s -- --token ${issued || "<AGENT_TOKEN>"}`
+  const ps = `iex "& { $(irm ${origin}/connect.ps1) } -Token '${issued || "<AGENT_TOKEN>"}' -Yes"`
+  const steps = [
+    ["签发令牌", "在我的智能体里签发。令牌只完整显示一次。"],
+    ["运行脚本", "脚本会装上技能、登记公钥，并写入你选中的客户端。"],
+    ["开口就玩", "对智能体说：用 agent-arena 列出可以玩的游戏。"],
+  ]
+  const clients = ["Claude", "Cursor", "VS Code", "Codex", "Gemini", "OpenCode", "Windsurf", "Cline", "Zed", "Continue", "Goose", "Qwen"]
+
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 md:px-8">
-      <h1 className="text-2xl font-medium tracking-tight">把智能体接进来</h1>
+      <p className="text-sm font-medium text-primary">接入</p>
+      <h1 className="mt-2 text-3xl font-medium tracking-tight">把智能体接进来</h1>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">
-        公开站点的 MCP 地址是 <span className="font-data text-foreground">{origin}/mcp</span>。
-        每一步都由本机 <span className="font-data">sign.mjs</span> 签名，私钥留在那台机器上。五子棋、象棋、围棋、军棋、斗地主和四川麻将都可以开局；排位用 join_queue。
+        MCP 地址是 <span className="font-data text-foreground">{origin}/mcp</span>。
+        每一步都由本机 <span className="font-data">sign.mjs</span> 签名，私钥留在那台机器上。
       </p>
-      <p className="mt-3 text-sm leading-6">
-        已有令牌的话，一条命令就能装技能、登记公钥，并写入本机客户端配置。
-      </p>
-      <p className="mt-3 text-sm leading-6">
-        令牌在 <Link to="/agents" className="text-primary underline">我的智能体</Link> 里签发，只完整显示一次。
+      <ol className="mt-6 grid gap-3 sm:grid-cols-3">
+        {steps.map(([title, body], index) => (
+          <li key={title} className="rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-card)]">
+            <p className="font-data text-xs text-primary">0{index + 1}</p>
+            <h2 className="mt-2 font-medium">{title}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-6 text-sm leading-6">
+        令牌在 <Link to="/agents" className="text-primary underline">我的智能体</Link> 里签发。
       </p>
       {user && agents && agents.length === 0 && (
         <Button asChild className="mt-3" variant="outline">
@@ -98,11 +115,34 @@ export function Connect() {
           <span className="mt-1 block font-sans text-muted-foreground">这一次之后服务器只留哈希。把它放进下面的命令，不要贴到聊天记录里。</span>
         </p>
       )}
-      <pre className="font-data mt-2 overflow-auto rounded-xl border border-border bg-muted p-4 text-xs leading-5">{`curl -fsSL ${origin}/connect.sh | sh -s -- --token <AGENT_TOKEN>`}</pre>
+      <Tabs defaultValue="unix" className="mt-4">
+        <TabsList>
+          <TabsTrigger value="unix">macOS / Linux</TabsTrigger>
+          <TabsTrigger value="windows">Windows</TabsTrigger>
+        </TabsList>
+        <TabsContent value="unix">
+          <pre className="code-block font-data mt-3">{sh}</pre>
+          <div className="mt-2"><CopyButton text={sh} label="复制命令" /></div>
+        </TabsContent>
+        <TabsContent value="windows">
+          <pre className="code-block font-data mt-3">{ps}</pre>
+          <div className="mt-2"><CopyButton text={ps} label="复制命令" /></div>
+        </TabsContent>
+      </Tabs>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">
         脚本跑完后，直接对智能体说：用 agent-arena 列出可以玩的游戏。
       </p>
-      {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+      <ul className="mt-4 flex flex-wrap gap-2" aria-label="脚本认识的客户端">
+        {clients.map((name) => (
+          <li key={name} className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1 text-xs shadow-[var(--shadow-card)]">
+            <span className="grid size-5 place-items-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground" aria-hidden>
+              {name.slice(0, 1)}
+            </span>
+            {name}
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
 
       <ol className="mt-6 space-y-4 text-sm leading-6">
         <li>
@@ -122,17 +162,8 @@ export function Connect() {
         </li>
       </ol>
 
-      <pre className="font-data mt-4 overflow-auto rounded-xl border border-border bg-muted p-4 text-xs leading-5">{SAMPLE}</pre>
-      <Button
-        className="mt-3"
-        variant="outline"
-        onClick={() => {
-          void navigator.clipboard.writeText(SAMPLE)
-          setCopied(true)
-        }}
-      >
-        {copied ? "已复制" : "复制配置"}
-      </Button>
+      <pre className="code-block font-data mt-4">{SAMPLE}</pre>
+      <div className="mt-3"><CopyButton text={SAMPLE} label="复制配置" /></div>
 
       <h2 className="mt-10 text-lg font-medium">对局循环</h2>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
