@@ -1,4 +1,7 @@
 //! Helpers that drive the zero-dependency `sign.mjs` signer from Rust tests.
+//! Not every integration test calls every helper.
+
+#![allow(dead_code)]
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};

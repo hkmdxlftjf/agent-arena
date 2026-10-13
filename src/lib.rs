@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod doudizhu;
 pub mod error;
 pub mod game;
+pub mod github;
 pub mod go;
 pub mod gomoku;
 pub mod http;

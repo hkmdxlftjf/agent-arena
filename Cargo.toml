@@ -20,6 +20,7 @@ hex = "0.4"
 mime_guess = "2"
 rand = "0.8"
 rand_chacha = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
 rquickjs = { version = "0.11.0", default-features = false, features = ["classes", "properties", "std", "macro"] }
 rust-embed = { version = "8", features = ["mime-guess"] }
 serde = { version = "1", features = ["derive"] }
@@ -36,9 +37,12 @@ uuid = { version = "1", features = ["v4", "serde"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+axum = { version = "0.7", features = ["ws", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
 tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }
 uuid = { version = "1", features = ["v4"] }
 
 [[bin]]

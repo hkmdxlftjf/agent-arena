@@ -185,7 +185,12 @@ struct PlayerRow {
     public_key_b64: Option<String>,
 }
 
-pub async fn spawn_room(pool: PgPool, server: ServerKey, hub: &Hub, id: Uuid) -> anyhow::Result<()> {
+pub async fn spawn_room(
+    pool: PgPool,
+    server: ServerKey,
+    hub: &Hub,
+    id: Uuid,
+) -> anyhow::Result<()> {
     let slot = hub.slot(id);
     let rx = {
         let mut cmd = slot.cmd.lock().expect("cmd lock");
@@ -235,10 +240,7 @@ impl Engine {
         if engine.status == "running" && engine.chain.entries.is_empty() {
             engine.open_genesis().await?;
         }
-        if engine.status == "running"
-            && engine.decisions.is_empty()
-            && !engine.is_terminal()
-        {
+        if engine.status == "running" && engine.decisions.is_empty() && !engine.is_terminal() {
             engine.refresh_decisions();
             engine.commit().await?;
         }
@@ -342,7 +344,12 @@ impl Engine {
         .await?;
         let secrets = secret_rows
             .into_iter()
-            .map(|(seat, commitment, data, salt)| Secret { seat: seat as i32, commitment, data, salt })
+            .map(|(seat, commitment, data, salt)| Secret {
+                seat: seat as i32,
+                commitment,
+                data,
+                salt,
+            })
             .collect();
         let (seed, seed_hex) = match &row.seed {
             Some(h) => (parse_seed(h), h.clone()),
@@ -384,7 +391,11 @@ impl Engine {
     }
 
     async fn open_genesis(&mut self) -> anyhow::Result<()> {
-        if self.players.iter().any(|p| p.public_b64.is_empty() || p.kid.is_empty()) {
+        if self
+            .players
+            .iter()
+            .any(|p| p.public_b64.is_empty() || p.kid.is_empty())
+        {
             anyhow::bail!("seat is missing a registered key");
         }
         let mut seed = [0u8; 32];
@@ -471,7 +482,12 @@ impl Engine {
                 self.mark_seen(agent_id);
                 let _ = reply.send(self.agent_json(agent_id));
             }
-            Cmd::Move { agent_id, envelope, private, reply } => {
+            Cmd::Move {
+                agent_id,
+                envelope,
+                private,
+                reply,
+            } => {
                 self.mark_seen(agent_id);
                 let value = self.handle_move(agent_id, envelope, private).await;
                 let _ = reply.send(value);
@@ -504,7 +520,10 @@ impl Engine {
     }
 
     fn is_terminal(&self) -> bool {
-        self.state.as_ref().map(|s| self.game.is_terminal(s)).unwrap_or(false)
+        self.state
+            .as_ref()
+            .map(|s| self.game.is_terminal(s))
+            .unwrap_or(false)
     }
 
     fn refresh_decisions(&mut self) {
@@ -529,7 +548,12 @@ impl Engine {
                         return existing.clone();
                     }
                 }
-                Decision { seq, prev_hash: prev.clone(), seat, deadline_at: deadline }
+                Decision {
+                    seq,
+                    prev_hash: prev.clone(),
+                    seat,
+                    deadline_at: deadline,
+                }
             })
             .collect();
     }
@@ -552,7 +576,11 @@ impl Engine {
         if self.status != "running" {
             return Ok(());
         }
-        if !self.decisions.iter().any(|x| x.seat == d.seat && x.seq == d.seq) {
+        if !self
+            .decisions
+            .iter()
+            .any(|x| x.seat == d.seat && x.seq == d.seq)
+        {
             return Ok(());
         }
         let backup_chain = self.chain.clone();
@@ -567,28 +595,43 @@ impl Engine {
         if let Some(p) = self.players.iter_mut().find(|p| p.seat == d.seat) {
             p.timeouts += 1;
         }
-        let timeouts = self.players.iter().find(|p| p.seat == d.seat).map(|p| p.timeouts).unwrap_or(1);
+        let timeouts = self
+            .players
+            .iter()
+            .find(|p| p.seat == d.seat)
+            .map(|p| p.timeouts)
+            .unwrap_or(1);
         let mut policy = self.policy;
-        let allows_forfeit = self.game.manifest().allowed_timeout_policies.contains(&TimeoutPolicy::Forfeit);
-        if allows_forfeit && policy != TimeoutPolicy::Forfeit && self.max_timeouts > 0 && timeouts >= self.max_timeouts {
+        let allows_forfeit = self
+            .game
+            .manifest()
+            .allowed_timeout_policies
+            .contains(&TimeoutPolicy::Forfeit);
+        if allows_forfeit
+            && policy != TimeoutPolicy::Forfeit
+            && self.max_timeouts > 0
+            && timeouts >= self.max_timeouts
+        {
             policy = TimeoutPolicy::Forfeit;
         }
         let mut rng = crate::game::SeededRng::from_seed_seq(&self.seed, d.seq);
-        let decision = match self.game.timeout_decision(
-            self.state.as_ref().unwrap(),
-            d.seat,
-            policy,
-            &mut rng,
-        ) {
-            Ok(d) => d,
-            Err(_) => crate::game::TimeoutDecision {
-                policy: TimeoutPolicy::Forfeit,
-                action: None,
-            },
-        };
+        let decision =
+            match self
+                .game
+                .timeout_decision(self.state.as_ref().unwrap(), d.seat, policy, &mut rng)
+            {
+                Ok(d) => d,
+                Err(_) => crate::game::TimeoutDecision {
+                    policy: TimeoutPolicy::Forfeit,
+                    action: None,
+                },
+            };
         let fired = now_ms();
         let action_for_log: Value = if let Some(action) = decision.action.clone() {
-            match self.game.apply(self.state.as_ref().unwrap(), d.seat, &action, &mut rng) {
+            match self
+                .game
+                .apply(self.state.as_ref().unwrap(), d.seat, &action, &mut rng)
+            {
                 Ok((next, _)) => {
                     self.state = Some(next);
                     action
@@ -605,9 +648,9 @@ impl Engine {
         } else {
             Value::Null
         };
-        let policy_str = if action_for_log.is_null() && decision.policy != TimeoutPolicy::AutoAction {
-            "forfeit"
-        } else if self.is_terminal() && action_for_log.is_null() {
+        let policy_str = if action_for_log.is_null()
+            && (decision.policy != TimeoutPolicy::AutoAction || self.is_terminal())
+        {
             "forfeit"
         } else {
             decision.policy.as_str()
@@ -621,7 +664,8 @@ impl Engine {
             "deadline_at": d.deadline_at,
             "fired_at": fired,
         });
-        self.chain.append_server("auto_action", "auto_action", payload);
+        self.chain
+            .append_server("auto_action", "auto_action", payload);
         self.finish_if_terminal();
         if !self.is_terminal() {
             self.refresh_decisions();
@@ -670,10 +714,17 @@ impl Engine {
     fn forfeit_seat(&mut self, seat: i32) {
         if self.game_id == "gomoku" {
             let winner = self.opponent(seat);
-            self.state = Some(force_terminal(self.state.as_ref().unwrap(), winner, "timeout"));
+            self.state = Some(force_terminal(
+                self.state.as_ref().unwrap(),
+                winner,
+                "timeout",
+            ));
         } else if let Some(state) = self.state.clone() {
             let mut rng = crate::game::SeededRng::from_seed_seq(&self.seed, 0);
-            if let Ok((next, _)) = self.game.apply(&state, seat, &json!({"type":"resign"}), &mut rng) {
+            if let Ok((next, _)) =
+                self.game
+                    .apply(&state, seat, &json!({"type":"resign"}), &mut rng)
+            {
                 self.state = Some(next);
             }
         }
@@ -698,16 +749,26 @@ impl Engine {
             p.score = result.scores.get(p.seat as usize).copied();
         }
         if !self.secrets.is_empty() {
-            let reveals: Vec<Value> = self.secrets.iter().map(|s| json!({
-                "data": s.data,
-                "salt": s.salt,
-                "commitment": s.commitment,
-                "seat": s.seat,
-            })).collect();
-            self.chain.append_server("reveal", "reveal", json!({
-                "match_id": self.match_id.to_string(),
-                "reveals": reveals,
-            }));
+            let reveals: Vec<Value> = self
+                .secrets
+                .iter()
+                .map(|s| {
+                    json!({
+                        "data": s.data,
+                        "salt": s.salt,
+                        "commitment": s.commitment,
+                        "seat": s.seat,
+                    })
+                })
+                .collect();
+            self.chain.append_server(
+                "reveal",
+                "reveal",
+                json!({
+                    "match_id": self.match_id.to_string(),
+                    "reveals": reveals,
+                }),
+            );
             self.secrets.clear();
         }
         let final_hash = self.chain.tip_hash().to_string();
@@ -725,7 +786,12 @@ impl Engine {
     }
 
     async fn handle_resign(&mut self, agent_id: Uuid) -> Value {
-        let Some(seat) = self.players.iter().find(|p| p.agent_id == agent_id).map(|p| p.seat) else {
+        let Some(seat) = self
+            .players
+            .iter()
+            .find(|p| p.agent_id == agent_id)
+            .map(|p| p.seat)
+        else {
             return json!({"accepted": false, "error": "not_seated", "message": "你不在这局里"});
         };
         if self.status != "running" || self.is_terminal() {
@@ -738,10 +804,17 @@ impl Engine {
         let backup_result = self.result.clone();
         let backup_reason = self.end_reason.clone();
         let backup_secrets = self.secrets.clone();
-        let decision_seq = self.decisions.iter().find(|d| d.seat == seat).map(|d| d.seq);
+        let decision_seq = self
+            .decisions
+            .iter()
+            .find(|d| d.seat == seat)
+            .map(|d| d.seq);
         let mut rng = crate::game::SeededRng::from_seed_seq(&self.seed, decision_seq.unwrap_or(0));
         let action = json!({"type": "resign"});
-        match self.game.apply(self.state.as_ref().unwrap(), seat, &action, &mut rng) {
+        match self
+            .game
+            .apply(self.state.as_ref().unwrap(), seat, &action, &mut rng)
+        {
             Ok((next, _)) => self.state = Some(next),
             Err(err) => {
                 return json!({"accepted": false, "error": "illegal_action", "message": err.0});
@@ -780,11 +853,24 @@ impl Engine {
         accepted_from(&resign, false)
     }
 
-    async fn handle_move(&mut self, agent_id: Uuid, envelope: Value, private: Option<Value>) -> Value {
+    async fn handle_move(
+        &mut self,
+        agent_id: Uuid,
+        envelope: Value,
+        private: Option<Value>,
+    ) -> Value {
         let domain_v = envelope.get("domain").cloned().unwrap_or(Value::Null);
         let payload = envelope.get("payload").cloned().unwrap_or(Value::Null);
-        let signature = envelope.get("signature").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let kid = envelope.get("kid").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let signature = envelope
+            .get("signature")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let kid = envelope
+            .get("kid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let alg = envelope.get("alg").and_then(|v| v.as_str()).unwrap_or("");
 
         let Some(player) = self.players.iter().find(|p| p.agent_id == agent_id) else {
@@ -798,84 +884,202 @@ impl Engine {
         let agent_str = agent_id.to_string();
 
         if self.status != "running" {
-            return self.nack("game_over", "对局不在进行中", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "game_over",
+                "对局不在进行中",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         if alg != "ed25519" {
-            return self.nack("bad_signature", "仅支持 ed25519", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "bad_signature",
+                "仅支持 ed25519",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         if !domain_ok(&domain_v, "move") {
-            return self.nack("domain_mismatch", "domain 必须是 AgentArena v1 / arena.idou.top / purpose=move", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "domain_mismatch",
+                "domain 必须是 AgentArena v1 / arena.idou.top / purpose=move",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         if json_i64(&payload["v"]) != Some(1) {
-            return self.nack("context_mismatch", "载荷 v 必须为 1", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "context_mismatch",
+                "载荷 v 必须为 1",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
-        if kid != player_kid || payload.get("kid").and_then(|v| v.as_str()) != Some(player_kid.as_str()) {
-            return self.nack("key_mismatch", "签名密钥与本局绑定的密钥不一致", Some(player_seat), &payload, json!({}));
+        if kid != player_kid
+            || payload.get("kid").and_then(|v| v.as_str()) != Some(player_kid.as_str())
+        {
+            return self.nack(
+                "key_mismatch",
+                "签名密钥与本局绑定的密钥不一致",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
-        let key_status: Option<String> = sqlx::query_scalar("SELECT status FROM agent_keys WHERE kid = $1 AND agent_id = $2")
-            .bind(&player_kid)
-            .bind(agent_id)
-            .fetch_optional(&self.pool)
-            .await
-            .ok()
-            .flatten();
+        let key_status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM agent_keys WHERE kid = $1 AND agent_id = $2")
+                .bind(&player_kid)
+                .bind(agent_id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
         match key_status.as_deref() {
             Some("revoked") => {
-                return self.nack("key_revoked", "密钥已吊销，本局只能认输", Some(player_seat), &payload, json!({}));
+                return self.nack(
+                    "key_revoked",
+                    "密钥已吊销，本局只能认输",
+                    Some(player_seat),
+                    &payload,
+                    json!({}),
+                );
             }
             Some("active") | Some("rotated") => {}
             _ => {
-                return self.nack("unknown_key", "找不到这把密钥", Some(player_seat), &payload, json!({}));
+                return self.nack(
+                    "unknown_key",
+                    "找不到这把密钥",
+                    Some(player_seat),
+                    &payload,
+                    json!({}),
+                );
             }
         }
         if !verify_value(&player_pub, &domain_v, &payload, &signature) {
-            return self.nack("bad_signature", "签名验证失败", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "bad_signature",
+                "签名验证失败",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         if payload.get("match_id").and_then(|v| v.as_str()) != Some(match_id_str.as_str())
             || payload.get("game_id").and_then(|v| v.as_str()) != Some(self.game_id.as_str())
-            || payload.get("game_version").and_then(|v| v.as_str()) != Some(self.game_version.as_str())
+            || payload.get("game_version").and_then(|v| v.as_str())
+                != Some(self.game_version.as_str())
             || payload.get("rules_hash").and_then(|v| v.as_str()) != Some(self.rules_hash.as_str())
             || json_i64(&payload["seat"]) != Some(player_seat as i64)
             || payload.get("agent_id").and_then(|v| v.as_str()) != Some(agent_str.as_str())
         {
-            return self.nack("context_mismatch", "match_id / 规则 / 席位 / 智能体与本局不一致", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "context_mismatch",
+                "match_id / 规则 / 席位 / 智能体与本局不一致",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         let Some(signed_seq) = json_i64(&payload["seq"]) else {
-            return self.nack("seq_mismatch", "缺少 seq", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "seq_mismatch",
+                "缺少 seq",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         };
-        let signed_prev = payload.get("prev_hash").and_then(|v| v.as_str()).unwrap_or("");
-        let decision = self.decisions.iter().find(|d| d.seat == player_seat).cloned();
+        let signed_prev = payload
+            .get("prev_hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let decision = self
+            .decisions
+            .iter()
+            .find(|d| d.seat == player_seat)
+            .cloned();
         let Some(decision) = decision else {
             if let Some(existing) = self.find_decision_entry(player_seat, signed_seq) {
                 if payload_hash_hex(&existing["payload"]) == payload_hash_hex(&payload) {
                     return accepted_from(existing, true);
                 }
-                return self.nack("replay_rejected", "这个决策点已经有一份不同的签名", Some(player_seat), &payload, json!({}));
+                return self.nack(
+                    "replay_rejected",
+                    "这个决策点已经有一份不同的签名",
+                    Some(player_seat),
+                    &payload,
+                    json!({}),
+                );
             }
-            return self.nack("seq_mismatch", "现在没有轮到你行动", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "seq_mismatch",
+                "现在没有轮到你行动",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         };
         if signed_seq != decision.seq {
-            return self.nack("seq_mismatch", "seq 不是当前决策点", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "seq_mismatch",
+                "seq 不是当前决策点",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         if signed_prev != decision.prev_hash {
-            return self.nack("stale_prev_hash", "prev_hash 与当前决策点不一致", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "stale_prev_hash",
+                "prev_hash 与当前决策点不一致",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         if let Some(existing) = self.find_decision_entry(player_seat, signed_seq) {
             if payload_hash_hex(&existing["payload"]) == payload_hash_hex(&payload) {
                 return accepted_from(existing, true);
             }
-            return self.nack("replay_rejected", "这个决策点已经有一份不同的签名", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "replay_rejected",
+                "这个决策点已经有一份不同的签名",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         let signed_deadline = json_i64(&payload["deadline_at"]);
         if signed_deadline != Some(decision.deadline_at) {
-            return self.nack("context_mismatch", "deadline_at 与服务器记录不一致，请重新 get_state", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "context_mismatch",
+                "deadline_at 与服务器记录不一致，请重新 get_state",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         if now_ms() > decision.deadline_at + self.grace_ms {
             let start = self.chain.entries.len();
             if let Err(err) = self.apply_timeout(&decision).await {
-                return self.nack("persist", err.to_string(), Some(player_seat), &payload, json!({}));
+                return self.nack(
+                    "persist",
+                    err.to_string(),
+                    Some(player_seat),
+                    &payload,
+                    json!({}),
+                );
             }
-            let auto = self.chain.entries.get(start).cloned().unwrap_or(Value::Null);
+            let auto = self
+                .chain
+                .entries
+                .get(start)
+                .cloned()
+                .unwrap_or(Value::Null);
             return self.nack(
                 "deadline_passed",
                 "已超过截止时间，服务器执行了超时动作",
@@ -885,17 +1089,41 @@ impl Engine {
             );
         }
         let Some(issued) = json_i64(&payload["issued_at"]) else {
-            return self.nack("context_mismatch", "缺少 issued_at", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "context_mismatch",
+                "缺少 issued_at",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         };
         if (issued - now_ms()).abs() > 5 * 60 * 1000 {
-            return self.nack("issued_at_out_of_range", "issued_at 超出 ±5 分钟", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "issued_at_out_of_range",
+                "issued_at 超出 ±5 分钟",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         if let Some(comment) = payload.get("comment").and_then(|v| v.as_str()) {
             if comment.chars().count() > 140 {
-                return self.nack("comment_too_long", "评论不能超过 140 字", Some(player_seat), &payload, json!({}));
+                return self.nack(
+                    "comment_too_long",
+                    "评论不能超过 140 字",
+                    Some(player_seat),
+                    &payload,
+                    json!({}),
+                );
             }
             if !self.allow_comments || !player_comments {
-                return self.nack("comment_disabled", "本局或该智能体未开启公开评论", Some(player_seat), &payload, json!({}));
+                return self.nack(
+                    "comment_disabled",
+                    "本局或该智能体未开启公开评论",
+                    Some(player_seat),
+                    &payload,
+                    json!({}),
+                );
             }
         }
         let action = payload.get("action").cloned().unwrap_or(Value::Null);
@@ -912,24 +1140,53 @@ impl Engine {
                 json!({"legal_actions": legal}),
             );
         }
-        let commitment = payload.get("commitment").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let commitment = payload
+            .get("commitment")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let mut apply_action = action.clone();
         let mut staged_secret: Option<Secret> = None;
         if let Some(commitment) = commitment {
             let Some(private) = private.as_ref() else {
-                return self.nack("missing_private", "带 commitment 的动作必须附上 private", Some(player_seat), &payload, json!({}));
+                return self.nack(
+                    "missing_private",
+                    "带 commitment 的动作必须附上 private",
+                    Some(player_seat),
+                    &payload,
+                    json!({}),
+                );
             };
             let data = private.get("data").cloned().unwrap_or(Value::Null);
             let salt = private.get("salt").and_then(|v| v.as_str()).unwrap_or("");
             if commitment_of(&data, salt).as_deref() != Some(commitment.as_str()) {
-                return self.nack("bad_commitment", "承诺和私密数据对不上", Some(player_seat), &payload, json!({}));
+                return self.nack(
+                    "bad_commitment",
+                    "承诺和私密数据对不上",
+                    Some(player_seat),
+                    &payload,
+                    json!({}),
+                );
             }
             if let Some(obj) = apply_action.as_object_mut() {
-                obj.insert("_private".into(), json!({"data": data.clone(), "salt": salt}));
+                obj.insert(
+                    "_private".into(),
+                    json!({"data": data.clone(), "salt": salt}),
+                );
             }
-            staged_secret = Some(Secret { seat: player_seat, commitment, data, salt: salt.to_string() });
+            staged_secret = Some(Secret {
+                seat: player_seat,
+                commitment,
+                data,
+                salt: salt.to_string(),
+            });
         } else if private.is_some() {
-            return self.nack("unexpected_private", "没有 commitment 时不要附带 private", Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "unexpected_private",
+                "没有 commitment 时不要附带 private",
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
 
         let backup_chain = self.chain.clone();
@@ -941,10 +1198,21 @@ impl Engine {
         let backup_players = self.player_backup();
         let backup_secrets = self.secrets.clone();
         let mut rng = crate::game::SeededRng::from_seed_seq(&self.seed, signed_seq);
-        match self.game.apply(self.state.as_ref().unwrap(), player_seat, &apply_action, &mut rng) {
+        match self.game.apply(
+            self.state.as_ref().unwrap(),
+            player_seat,
+            &apply_action,
+            &mut rng,
+        ) {
             Ok((next, _)) => self.state = Some(next),
             Err(err) => {
-                return self.nack("illegal_action", err.0, Some(player_seat), &payload, json!({"legal_actions": legal}));
+                return self.nack(
+                    "illegal_action",
+                    err.0,
+                    Some(player_seat),
+                    &payload,
+                    json!({"legal_actions": legal}),
+                );
             }
         }
         if let Some(secret) = staged_secret {
@@ -953,7 +1221,8 @@ impl Engine {
         if let Some(p) = self.players.iter_mut().find(|p| p.seat == player_seat) {
             p.timeouts = 0;
         }
-        self.chain.append_agent(domain_v, payload.clone(), &kid, &signature);
+        self.chain
+            .append_agent(domain_v, payload.clone(), &kid, &signature);
         self.finish_if_terminal();
         if self.status == "running" {
             self.refresh_decisions();
@@ -967,7 +1236,13 @@ impl Engine {
             self.end_reason = backup_reason;
             self.restore_players(backup_players);
             self.secrets = backup_secrets;
-            return self.nack("persist", err.to_string(), Some(player_seat), &payload, json!({}));
+            return self.nack(
+                "persist",
+                err.to_string(),
+                Some(player_seat),
+                &payload,
+                json!({}),
+            );
         }
         let _ = sqlx::query("UPDATE agent_keys SET last_signed_at = now() WHERE kid = $1")
             .bind(&kid)
@@ -1001,7 +1276,14 @@ impl Engine {
         })
     }
 
-    fn nack(&self, code: &'static str, message: impl Into<String>, seat: Option<i32>, payload: &Value, extra: Value) -> Value {
+    fn nack(
+        &self,
+        code: &'static str,
+        message: impl Into<String>,
+        seat: Option<i32>,
+        payload: &Value,
+        extra: Value,
+    ) -> Value {
         let message = message.into();
         let received_at = now_ms();
         let ph = payload_hash_hex(payload);
@@ -1112,9 +1394,15 @@ impl Engine {
             .execute(&mut *tx)
             .await?;
         }
-        let settling = self.chain.entries[self.persisted..].iter().any(|e| e["kind"] == "result");
+        let settling = self.chain.entries[self.persisted..]
+            .iter()
+            .any(|e| e["kind"] == "result");
         if settling && self.mode == "ranked" {
-            let participants: Vec<(Uuid, f64)> = self.players.iter().map(|p| (p.agent_id, p.score.unwrap_or(0.0))).collect();
+            let participants: Vec<(Uuid, f64)> = self
+                .players
+                .iter()
+                .map(|p| (p.agent_id, p.score.unwrap_or(0.0)))
+                .collect();
             crate::rating::apply(&mut tx, self.match_id, &self.game_id, &participants).await?;
         }
         tx.commit().await?;
@@ -1132,7 +1420,10 @@ impl Engine {
     fn public_json(&self) -> Value {
         let now = now_ms();
         let to_act: Vec<i32> = if self.status == "running" {
-            self.state.as_ref().map(|s| self.game.to_act(s)).unwrap_or_default()
+            self.state
+                .as_ref()
+                .map(|s| self.game.to_act(s))
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -1142,7 +1433,13 @@ impl Engine {
             .as_ref()
             .map(|s| {
                 self.game
-                    .view(s, &Viewer { seat: None, omniscient: self.status == "finished" })
+                    .view(
+                        s,
+                        &Viewer {
+                            seat: None,
+                            omniscient: self.status == "finished",
+                        },
+                    )
                     .unwrap_or(Value::Null)
             })
             .unwrap_or(Value::Null);
@@ -1217,12 +1514,19 @@ impl Engine {
         };
         let mut body = self.public_json();
         if let Some(state) = &self.state {
-            body["view"] = self.game.view(state, &Viewer {
-                seat: Some(player.seat),
-                omniscient: self.status == "finished",
-            }).unwrap_or(Value::Null);
+            body["view"] = self
+                .game
+                .view(
+                    state,
+                    &Viewer {
+                        seat: Some(player.seat),
+                        omniscient: self.status == "finished",
+                    },
+                )
+                .unwrap_or(Value::Null);
         }
-        let your_turn = self.decisions.iter().any(|d| d.seat == player.seat) && self.status == "running";
+        let your_turn =
+            self.decisions.iter().any(|d| d.seat == player.seat) && self.status == "running";
         body["seat"] = json!(player.seat);
         body["consecutive_timeouts"] = json!(player.timeouts);
         body["phase"] = json!(phase_of(&self.status));
@@ -1266,11 +1570,38 @@ impl Engine {
 
 fn seat_role(game: &str, seat: i32) -> &'static str {
     match game {
-        "gomoku" | "go" => if seat == 0 { "黑" } else { "白" },
-        "xiangqi" => if seat == 0 { "红" } else { "黑" },
-        "junqi" => if seat == 0 { "南" } else { "北" },
-        "doudizhu" => match seat { 0 => "甲", 1 => "乙", _ => "丙" },
-        "mahjong-sichuan" => match seat { 0 => "东", 1 => "南", 2 => "西", _ => "北" },
+        "gomoku" | "go" => {
+            if seat == 0 {
+                "黑"
+            } else {
+                "白"
+            }
+        }
+        "xiangqi" => {
+            if seat == 0 {
+                "红"
+            } else {
+                "黑"
+            }
+        }
+        "junqi" => {
+            if seat == 0 {
+                "南"
+            } else {
+                "北"
+            }
+        }
+        "doudizhu" => match seat {
+            0 => "甲",
+            1 => "乙",
+            _ => "丙",
+        },
+        "mahjong-sichuan" => match seat {
+            0 => "东",
+            1 => "南",
+            2 => "西",
+            _ => "北",
+        },
         _ => match seat {
             0 => "甲",
             1 => "乙",
@@ -1281,18 +1612,28 @@ fn seat_role(game: &str, seat: i32) -> &'static str {
     }
 }
 
-async fn load_game(pool: &PgPool, game_id: &str, version_id: Uuid) -> anyhow::Result<Arc<dyn Game>> {
+async fn load_game(
+    pool: &PgPool,
+    game_id: &str,
+    version_id: Uuid,
+) -> anyhow::Result<Arc<dyn Game>> {
     if let Some(game) = crate::game::registry().get(game_id) {
         return Ok(game);
     }
-    let row = sqlx::query_as::<_, (Option<String>, Value)>("SELECT source, manifest FROM game_versions WHERE id = $1")
-        .bind(version_id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("missing rules {game_id}"))?;
-    let source = row.0.ok_or_else(|| anyhow::anyhow!("uploaded rules {game_id} have no source"))?;
+    let row = sqlx::query_as::<_, (Option<String>, Value)>(
+        "SELECT source, manifest FROM game_versions WHERE id = $1",
+    )
+    .bind(version_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("missing rules {game_id}"))?;
+    let source = row
+        .0
+        .ok_or_else(|| anyhow::anyhow!("uploaded rules {game_id} have no source"))?;
     let manifest: Manifest = serde_json::from_value(row.1)?;
-    Ok(Arc::new(crate::sandbox::JsGame::from_stored(source, manifest)))
+    Ok(Arc::new(crate::sandbox::JsGame::from_stored(
+        source, manifest,
+    )))
 }
 
 fn phase_of(status: &str) -> &'static str {
@@ -1340,7 +1681,10 @@ async fn insert_event(
     let seq = json_i64(&entry["seq"]).unwrap_or(0) as i32;
     let kind = entry["kind"].as_str().unwrap_or("").to_string();
     let (seat, decision_seq) = event_seat_decision(entry);
-    let action = entry["payload"].get("action").cloned().filter(|v| !v.is_null());
+    let action = entry["payload"]
+        .get("action")
+        .cloned()
+        .filter(|v| !v.is_null());
     let signer = entry["signer"].as_str().unwrap_or("server").to_string();
     let kid = entry["kid"].as_str().unwrap_or("").to_string();
     let alg = entry["alg"].as_str().unwrap_or("ed25519").to_string();

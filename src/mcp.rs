@@ -56,14 +56,20 @@ pub async fn mcp_post(State(app): State<App>, headers: HeaderMap, body: String) 
         if let Some(sid) = header(&headers, "mcp-session-id") {
             let ok = sessions().lock().expect("sessions").get(sid).copied() == Some(agent.agent_id);
             if !ok {
-                return Responseish::err(StatusCode::NOT_FOUND, CallError::new(404, "session", "MCP 会话不存在"));
+                return Responseish::err(
+                    StatusCode::NOT_FOUND,
+                    CallError::new(404, "session", "MCP 会话不存在"),
+                );
             }
         }
     }
     let (result, new_session) = match method {
         "initialize" => {
             let sid = Uuid::new_v4().to_string();
-            sessions().lock().expect("sessions").insert(sid.clone(), agent.agent_id);
+            sessions()
+                .lock()
+                .expect("sessions")
+                .insert(sid.clone(), agent.agent_id);
             let proto = params
                 .get("protocolVersion")
                 .and_then(|v| v.as_str())
@@ -102,10 +108,18 @@ pub async fn mcp_post(State(app): State<App>, headers: HeaderMap, body: String) 
             }
         }
         _ => {
-            return Responseish::json(StatusCode::OK, rpc_error(id, -32601, "method not found"), None);
+            return Responseish::json(
+                StatusCode::OK,
+                rpc_error(id, -32601, "method not found"),
+                None,
+            );
         }
     };
-    Responseish::json(StatusCode::OK, json!({"jsonrpc": "2.0", "id": id, "result": result}), new_session)
+    Responseish::json(
+        StatusCode::OK,
+        json!({"jsonrpc": "2.0", "id": id, "result": result}),
+        new_session,
+    )
 }
 
 pub async fn mcp_get(headers: HeaderMap) -> Response {
@@ -119,7 +133,9 @@ pub async fn mcp_get(headers: HeaderMap) -> Response {
     response_sse(stream)
 }
 
-fn response_sse(stream: impl futures::Stream<Item = Result<String, std::io::Error>> + Send + 'static) -> Response {
+fn response_sse(
+    stream: impl futures::Stream<Item = Result<String, std::io::Error>> + Send + 'static,
+) -> Response {
     let body = Body::from_stream(stream);
     Response::builder()
         .status(StatusCode::OK)
@@ -145,10 +161,20 @@ pub struct Responseish {
 
 impl Responseish {
     fn json(status: StatusCode, body: Value, session: Option<String>) -> Self {
-        Self { status, body: Some(body), session, empty: false }
+        Self {
+            status,
+            body: Some(body),
+            session,
+            empty: false,
+        }
     }
     fn empty(status: StatusCode) -> Self {
-        Self { status, body: None, session: None, empty: true }
+        Self {
+            status,
+            body: None,
+            session: None,
+            empty: true,
+        }
     }
     fn err(status: StatusCode, err: CallError) -> Self {
         Self {
@@ -168,20 +194,27 @@ impl IntoResponse for Responseish {
             (self.status, Json(self.body.unwrap_or(json!({})))).into_response()
         };
         if let Some(sid) = self.session {
-            res.headers_mut().insert("mcp-session-id", sid.parse().unwrap());
+            res.headers_mut()
+                .insert("mcp-session-id", sid.parse().unwrap());
         }
         res
     }
 }
 
-async fn call_tool(app: &App, agent: &AgentCtx, name: &str, args: &Value) -> Result<Value, CallError> {
+async fn call_tool(
+    app: &App,
+    agent: &AgentCtx,
+    name: &str,
+    args: &Value,
+) -> Result<Value, CallError> {
     match name {
         "whoami" => app.whoami(agent).await,
         "list_games" => Ok(json!({"games": app.list_games()})),
         "create_room" => app.create_room(agent, args).await,
         "join_room" => {
             let code = args.get("code").and_then(|v| v.as_str()).unwrap_or("");
-            app.join_room(agent, code, args.get("kid").and_then(|v| v.as_str())).await
+            app.join_room(agent, code, args.get("kid").and_then(|v| v.as_str()))
+                .await
         }
         "get_state" => {
             let id = parse_match(args)?;
@@ -217,7 +250,8 @@ async fn call_tool(app: &App, agent: &AgentCtx, name: &str, args: &Value) -> Res
         "get_key_challenge" => app.key_challenge(agent).await,
         "register_agent_key" => {
             let envelope = args.get("envelope").cloned().unwrap_or(Value::Null);
-            app.register_key(agent, &envelope, args.get("label").and_then(|v| v.as_str())).await
+            app.register_key(agent, &envelope, args.get("label").and_then(|v| v.as_str()))
+                .await
         }
         _ => Err(CallError::new(400, "unknown_tool", "未知工具")),
     }
@@ -304,10 +338,21 @@ fn rpc_error(id: Value, code: i32, message: &str) -> Value {
 
 async fn bearer(app: &App, headers: &HeaderMap) -> Result<AgentCtx, CallError> {
     let Some(value) = header(headers, "authorization") else {
-        return Err(CallError::new(401, "unauthorized", "缺少 Authorization: Bearer"));
+        return Err(CallError::new(
+            401,
+            "unauthorized",
+            "缺少 Authorization: Bearer",
+        ));
     };
-    let Some(token) = value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer ")) else {
-        return Err(CallError::new(401, "unauthorized", "Authorization 必须是 Bearer 令牌"));
+    let Some(token) = value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))
+    else {
+        return Err(CallError::new(
+            401,
+            "unauthorized",
+            "Authorization 必须是 Bearer 令牌",
+        ));
     };
     app.authenticate(token.trim()).await
 }

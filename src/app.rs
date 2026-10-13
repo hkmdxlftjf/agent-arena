@@ -2,11 +2,16 @@
 
 use crate::canon::canon;
 use crate::config::Config;
-use crate::crypto::{b64url_decode, b64url_encode, domain, domain_ok, kid_of, now_ms, sha256, sha256_hex, verify_value, ServerKey};
+use crate::crypto::{
+    b64url_decode, b64url_encode, domain, domain_ok, kid_of, now_ms, sha256, sha256_hex,
+    verify_value, ServerKey,
+};
 use crate::error::CallError;
 use crate::game::registry;
 use crate::room::{roundtrip, spawn_room, Cmd, Engine, Hub, Slot};
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{
+    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use argon2::Argon2;
 use chrono::{DateTime, Duration, Utc};
 use rand::{Rng, RngCore};
@@ -32,6 +37,13 @@ pub struct User {
     pub handle: String,
     pub email: String,
     pub role: String,
+    pub github_login: Option<String>,
+    pub has_password: bool,
+}
+
+pub struct OAuthPending {
+    pub purpose: String,
+    pub user_id: Option<Uuid>,
 }
 
 #[allow(dead_code)]
@@ -160,20 +172,36 @@ impl App {
             .await
             .unwrap_or_default();
         for id in ids {
-            if let Err(err) = spawn_room(self.pool().clone(), self.server().clone(), &self.inner.hub, id).await {
+            if let Err(err) = spawn_room(
+                self.pool().clone(),
+                self.server().clone(),
+                &self.inner.hub,
+                id,
+            )
+            .await
+            {
                 tracing::error!(error = %err, %id, "failed to recover match");
             }
         }
     }
 
-    pub async fn register(&self, email: &str, password: &str, handle: &str) -> Result<(User, String), CallError> {
+    pub async fn register(
+        &self,
+        email: &str,
+        password: &str,
+        handle: &str,
+    ) -> Result<(User, String), CallError> {
         let email = email.trim().to_lowercase();
         let handle = handle.trim().to_lowercase();
         if !email.contains('@') || email.len() > 200 {
             return Err(CallError::new(400, "bad_email", "请填写有效邮箱"));
         }
         if !valid_handle(&handle) {
-            return Err(CallError::new(400, "bad_handle", "用户名需为 3–20 位小写字母、数字或下划线"));
+            return Err(CallError::new(
+                400,
+                "bad_handle",
+                "用户名需为 3–20 位小写字母、数字或下划线",
+            ));
         }
         let hash = hash_password(password)?;
         let id = Uuid::new_v4();
@@ -196,28 +224,52 @@ impl App {
         .fetch_one(self.pool())
         .await
         .map_err(unique_or_db("邮箱或用户名已被占用"))?;
-        let user = User { id: row.0, handle: row.1, email: row.2, role: row.3 };
+        let user = User {
+            id: row.0,
+            handle: row.1,
+            email: row.2,
+            role: row.3,
+            github_login: None,
+            has_password: true,
+        };
         let sid = self.create_session(user.id).await?;
         Ok((user, sid))
     }
 
     pub async fn login(&self, email: &str, password: &str) -> Result<(User, String), CallError> {
         let email = email.trim().to_lowercase();
-        let row = sqlx::query_as::<_, (Uuid, String, String, String, String)>(
-            "SELECT id, handle, email, role, password_hash FROM users WHERE email = $1",
+        let row = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>)>(
+            "SELECT id, handle, email, role, password_hash, github_login FROM users WHERE email = $1",
         )
         .bind(&email)
         .fetch_optional(self.pool())
         .await
         .map_err(db_err)?;
-        let Some((id, handle, email, role, hash)) = row else {
+        let Some((id, handle, email, role, hash, github_login)) = row else {
             return Err(CallError::new(401, "invalid_login", "邮箱或密码不正确"));
+        };
+        let Some(hash) = hash else {
+            return Err(CallError::new(
+                401,
+                "invalid_login",
+                "这个账号使用 GitHub 登录，还没有密码",
+            ));
         };
         if !verify_password(&hash, password) {
             return Err(CallError::new(401, "invalid_login", "邮箱或密码不正确"));
         }
         let sid = self.create_session(id).await?;
-        Ok((User { id, handle, email, role }, sid))
+        Ok((
+            User {
+                id,
+                handle,
+                email,
+                role,
+                github_login,
+                has_password: true,
+            },
+            sid,
+        ))
     }
 
     pub async fn logout(&self, sid: &str) -> Result<(), CallError> {
@@ -230,8 +282,8 @@ impl App {
     }
 
     pub async fn user_by_session(&self, sid: &str) -> Result<Option<User>, CallError> {
-        let row = sqlx::query_as::<_, (Uuid, String, String, String)>(
-            r#"SELECT u.id, u.handle, u.email, u.role
+        let row = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, bool)>(
+            r#"SELECT u.id, u.handle, u.email, u.role, u.github_login, u.password_hash IS NOT NULL
                FROM sessions s JOIN users u ON u.id = s.user_id
                WHERE s.id = $1 AND s.expires_at > now()"#,
         )
@@ -239,10 +291,293 @@ impl App {
         .fetch_optional(self.pool())
         .await
         .map_err(db_err)?;
-        Ok(row.map(|(id, handle, email, role)| User { id, handle, email, role }))
+        Ok(row.map(
+            |(id, handle, email, role, github_login, has_password)| User {
+                id,
+                handle,
+                email,
+                role,
+                github_login,
+                has_password,
+            },
+        ))
     }
 
-    async fn create_session(&self, user_id: Uuid) -> Result<String, CallError> {
+    pub async fn begin_oauth(
+        &self,
+        purpose: &str,
+        user_id: Option<Uuid>,
+    ) -> Result<String, CallError> {
+        if purpose != "login" && purpose != "link" {
+            return Err(CallError::new(400, "bad_oauth", "无效的登录方式"));
+        }
+        if purpose == "link" && user_id.is_none() {
+            return Err(CallError::new(401, "unauthorized", "请先登录再绑定 GitHub"));
+        }
+        let _ = sqlx::query("DELETE FROM oauth_states WHERE expires_at < now()")
+            .execute(self.pool())
+            .await;
+        let mut raw = [0u8; 32];
+        OsRng.fill_bytes(&mut raw);
+        let state = hex::encode(raw);
+        sqlx::query("INSERT INTO oauth_states (state, purpose, user_id, expires_at) VALUES ($1, $2, $3, $4)")
+            .bind(&state)
+            .bind(purpose)
+            .bind(user_id)
+            .bind(Utc::now() + Duration::minutes(10))
+            .execute(self.pool())
+            .await
+            .map_err(db_err)?;
+        Ok(state)
+    }
+
+    pub async fn take_oauth_state(&self, state: &str) -> Result<Option<OAuthPending>, CallError> {
+        let row = sqlx::query_as::<_, (String, Option<Uuid>)>(
+            "DELETE FROM oauth_states WHERE state = $1 AND expires_at > now() RETURNING purpose, user_id",
+        )
+        .bind(state)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok(row.map(|(purpose, user_id)| OAuthPending { purpose, user_id }))
+    }
+
+    pub async fn login_with_github(
+        &self,
+        gh: &crate::github::GitHubIdentity,
+    ) -> Result<(User, String), CallError> {
+        if let Some(user) = self.user_by_github(gh.id).await? {
+            let sid = self.create_session(user.id).await?;
+            return Ok((user, sid));
+        }
+        let Some(email) = gh.email.clone() else {
+            return Err(CallError::new(
+                400,
+                "github_email",
+                "GitHub 账号没有已验证的邮箱",
+            ));
+        };
+        if let Some((user, github_id, verified)) = self.account_by_email(&email).await? {
+            if !verified {
+                return Err(CallError::new(
+                    409,
+                    "github_taken",
+                    "这个邮箱还没有完成验证",
+                ));
+            }
+            if let Some(existing) = github_id {
+                if existing != gh.id {
+                    return Err(CallError::new(
+                        409,
+                        "github_taken",
+                        "这个邮箱已经绑定了另一个 GitHub 账号",
+                    ));
+                }
+            }
+            self.attach_github(user.id, gh).await?;
+            let user = self.load_user(user.id).await?;
+            let sid = self.create_session(user.id).await?;
+            return Ok((user, sid));
+        }
+        self.insert_github_user(gh, &email).await
+    }
+
+    pub async fn link_github(
+        &self,
+        user_id: Uuid,
+        gh: &crate::github::GitHubIdentity,
+    ) -> Result<User, CallError> {
+        if let Some(other) = self.user_by_github(gh.id).await? {
+            if other.id != user_id {
+                return Err(CallError::new(
+                    409,
+                    "github_taken",
+                    "这个 GitHub 账号已绑定其他用户",
+                ));
+            }
+        }
+        self.attach_github(user_id, gh).await?;
+        self.load_user(user_id).await
+    }
+
+    pub async fn unlink_github(&self, user: &User) -> Result<User, CallError> {
+        if !user.has_password {
+            return Err(CallError::new(
+                400,
+                "need_password",
+                "请先设置密码，再解除 GitHub 绑定",
+            ));
+        }
+        sqlx::query("UPDATE users SET github_id = NULL, github_login = NULL WHERE id = $1")
+            .bind(user.id)
+            .execute(self.pool())
+            .await
+            .map_err(db_err)?;
+        self.load_user(user.id).await
+    }
+
+    pub async fn set_password(
+        &self,
+        user: &User,
+        password: &str,
+        current: Option<&str>,
+    ) -> Result<User, CallError> {
+        if user.has_password {
+            let hash: Option<String> =
+                sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
+                    .bind(user.id)
+                    .fetch_optional(self.pool())
+                    .await
+                    .map_err(db_err)?
+                    .flatten();
+            let Some(hash) = hash else {
+                return Err(CallError::new(400, "need_password", "请先设置密码"));
+            };
+            let Some(current) = current.filter(|s| !s.is_empty()) else {
+                return Err(CallError::new(400, "bad_password", "请填写当前密码"));
+            };
+            if !verify_password(&hash, current) {
+                return Err(CallError::new(401, "bad_password", "当前密码不正确"));
+            }
+        }
+        let hash = hash_password(password)?;
+        sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+            .bind(&hash)
+            .bind(user.id)
+            .execute(self.pool())
+            .await
+            .map_err(db_err)?;
+        self.load_user(user.id).await
+    }
+
+    async fn load_user(&self, id: Uuid) -> Result<User, CallError> {
+        let row = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, bool)>(
+            "SELECT id, handle, email, role, github_login, password_hash IS NOT NULL FROM users WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        let Some((id, handle, email, role, github_login, has_password)) = row else {
+            return Err(CallError::new(404, "not_found", "找不到用户"));
+        };
+        Ok(User {
+            id,
+            handle,
+            email,
+            role,
+            github_login,
+            has_password,
+        })
+    }
+
+    async fn user_by_github(&self, github_id: i64) -> Result<Option<User>, CallError> {
+        let id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM users WHERE github_id = $1")
+            .bind(github_id)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?;
+        match id {
+            Some(id) => self.load_user(id).await.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    async fn account_by_email(
+        &self,
+        email: &str,
+    ) -> Result<Option<(User, Option<i64>, bool)>, CallError> {
+        let row = sqlx::query_as::<_, (Uuid, Option<i64>, bool)>(
+            "SELECT id, github_id, email_verified_at IS NOT NULL FROM users WHERE email = $1",
+        )
+        .bind(email)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        let Some((id, github_id, verified)) = row else {
+            return Ok(None);
+        };
+        Ok(Some((self.load_user(id).await?, github_id, verified)))
+    }
+
+    async fn attach_github(
+        &self,
+        user_id: Uuid,
+        gh: &crate::github::GitHubIdentity,
+    ) -> Result<(), CallError> {
+        sqlx::query("UPDATE users SET github_id = $1, github_login = $2 WHERE id = $3")
+            .bind(gh.id)
+            .bind(&gh.login)
+            .bind(user_id)
+            .execute(self.pool())
+            .await
+            .map_err(unique_or_db("这个 GitHub 账号已绑定其他用户"))?;
+        Ok(())
+    }
+
+    async fn insert_github_user(
+        &self,
+        gh: &crate::github::GitHubIdentity,
+        email: &str,
+    ) -> Result<(User, String), CallError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(self.pool())
+            .await
+            .map_err(db_err)?;
+        let mut role = if count == 0 { "admin" } else { "user" };
+        if admin_email(email) {
+            role = "admin";
+        }
+        let base = github_handle(&gh.login);
+        for n in 0..30u32 {
+            let handle = suffixed_handle(&base, n);
+            let id = Uuid::new_v4();
+            let inserted = sqlx::query(
+                "INSERT INTO users (id, handle, email, email_verified_at, password_hash, role, github_id, github_login) VALUES ($1, $2, $3, now(), NULL, $4, $5, $6)",
+            )
+            .bind(id)
+            .bind(&handle)
+            .bind(email)
+            .bind(role)
+            .bind(gh.id)
+            .bind(&gh.login)
+            .execute(self.pool())
+            .await;
+            match inserted {
+                Ok(_) => {
+                    let user = self.load_user(id).await?;
+                    let sid = self.create_session(id).await?;
+                    return Ok((user, sid));
+                }
+                Err(err) => {
+                    if let Some(constraint) = unique_constraint(&err) {
+                        if constraint.contains("handle") {
+                            continue;
+                        }
+                        if constraint.contains("github") {
+                            if let Some(user) = self.user_by_github(gh.id).await? {
+                                let sid = self.create_session(user.id).await?;
+                                return Ok((user, sid));
+                            }
+                        }
+                        return Err(CallError::new(
+                            409,
+                            "github_taken",
+                            "邮箱或 GitHub 账号已被占用",
+                        ));
+                    }
+                    return Err(db_err(err));
+                }
+            }
+        }
+        Err(CallError::new(
+            409,
+            "bad_handle",
+            "无法从 GitHub 用户名分配本地用户名",
+        ))
+    }
+
+    pub(crate) async fn create_session(&self, user_id: Uuid) -> Result<String, CallError> {
         let mut raw = [0u8; 32];
         OsRng.fill_bytes(&mut raw);
         let sid = hex::encode(raw);
@@ -274,7 +609,11 @@ impl App {
             .await
             .map_err(db_err)?;
         if count >= 5 {
-            return Err(CallError::new(400, "too_many_agents", "每个用户最多 5 个智能体"));
+            return Err(CallError::new(
+                400,
+                "too_many_agents",
+                "每个用户最多 5 个智能体",
+            ));
         }
         let id = Uuid::new_v4();
         let slug = format!("a{}", &id.simple().to_string()[..8]);
@@ -374,7 +713,11 @@ impl App {
         let hash = sha256(token.as_bytes());
         let prefix = format!("{}…{}", &token[..16], &token[token.len() - 4..]);
         let id = Uuid::new_v4();
-        let scopes = vec!["play:casual".to_string(), "play:ranked".to_string(), "rooms:create".to_string()];
+        let scopes = vec![
+            "play:casual".to_string(),
+            "play:ranked".to_string(),
+            "rooms:create".to_string(),
+        ];
         sqlx::query(
             "INSERT INTO agent_tokens (id, agent_id, token_hash, token_prefix, scopes) VALUES ($1,$2,$3,$4,$5)",
         )
@@ -394,7 +737,12 @@ impl App {
         }))
     }
 
-    pub async fn revoke_token(&self, user: &User, agent_id: Uuid, token_id: Uuid) -> Result<(), CallError> {
+    pub async fn revoke_token(
+        &self,
+        user: &User,
+        agent_id: Uuid,
+        token_id: Uuid,
+    ) -> Result<(), CallError> {
         self.owned_agent(user, agent_id).await?;
         sqlx::query("UPDATE agent_tokens SET revoked_at = now() WHERE id = $1 AND agent_id = $2 AND revoked_at IS NULL")
             .bind(token_id)
@@ -406,12 +754,13 @@ impl App {
     }
 
     async fn owned_agent(&self, user: &User, agent_id: Uuid) -> Result<(), CallError> {
-        let ok: Option<Uuid> = sqlx::query_scalar("SELECT id FROM agents WHERE id = $1 AND owner_id = $2")
-            .bind(agent_id)
-            .bind(user.id)
-            .fetch_optional(self.pool())
-            .await
-            .map_err(db_err)?;
+        let ok: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM agents WHERE id = $1 AND owner_id = $2")
+                .bind(agent_id)
+                .bind(user.id)
+                .fetch_optional(self.pool())
+                .await
+                .map_err(db_err)?;
         if ok.is_none() {
             return Err(CallError::new(404, "not_found", "找不到这个智能体"));
         }
@@ -477,7 +826,11 @@ impl App {
             .into_iter()
             .map(|m| serde_json::to_value(&m).unwrap_or(json!({})))
             .collect();
-        let uploads = self.inner.uploads.read().unwrap_or_else(|err| err.into_inner());
+        let uploads = self
+            .inner
+            .uploads
+            .read()
+            .unwrap_or_else(|err| err.into_inner());
         for info in uploads.values() {
             if info.playable {
                 games.push(info.manifest.clone());
@@ -490,21 +843,51 @@ impl App {
         if let Some(info) = self.inner.games.get(id) {
             return Ok(info.manifest.clone());
         }
-        let uploads = self.inner.uploads.read().unwrap_or_else(|err| err.into_inner());
-        let info = uploads.get(id).filter(|info| info.playable).ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
+        let uploads = self
+            .inner
+            .uploads
+            .read()
+            .unwrap_or_else(|err| err.into_inner());
+        let info = uploads
+            .get(id)
+            .filter(|info| info.playable)
+            .ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
         Ok(info.manifest.clone())
     }
 
     fn resolve_game(&self, game_id: &str) -> Result<LiveGame, CallError> {
-        let (version_id, rules_hash, playable, manifest) = if let Some(info) = self.inner.games.get(game_id) {
-            (info.version_id, info.rules_hash.clone(), info.playable, info.manifest.clone())
-        } else {
-            let uploads = self.inner.uploads.read().unwrap_or_else(|err| err.into_inner());
-            let info = uploads.get(game_id).ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
-            (info.version_id, info.rules_hash.clone(), info.playable, info.manifest.clone())
-        };
-        let manifest = serde_json::from_value(manifest).map_err(|err| CallError::new(500, "manifest", err.to_string()))?;
-        Ok(LiveGame { version_id, rules_hash, playable, manifest })
+        let (version_id, rules_hash, playable, manifest) =
+            if let Some(info) = self.inner.games.get(game_id) {
+                (
+                    info.version_id,
+                    info.rules_hash.clone(),
+                    info.playable,
+                    info.manifest.clone(),
+                )
+            } else {
+                let uploads = self
+                    .inner
+                    .uploads
+                    .read()
+                    .unwrap_or_else(|err| err.into_inner());
+                let info = uploads
+                    .get(game_id)
+                    .ok_or_else(|| CallError::new(404, "not_found", "没有这个游戏"))?;
+                (
+                    info.version_id,
+                    info.rules_hash.clone(),
+                    info.playable,
+                    info.manifest.clone(),
+                )
+            };
+        let manifest = serde_json::from_value(manifest)
+            .map_err(|err| CallError::new(500, "manifest", err.to_string()))?;
+        Ok(LiveGame {
+            version_id,
+            rules_hash,
+            playable,
+            manifest,
+        })
     }
 
     pub async fn key_challenge(&self, agent: &AgentCtx) -> Result<Value, CallError> {
@@ -538,19 +921,35 @@ impl App {
         }))
     }
 
-    pub async fn register_key(&self, agent: &AgentCtx, envelope: &Value, label: Option<&str>) -> Result<Value, CallError> {
+    pub async fn register_key(
+        &self,
+        agent: &AgentCtx,
+        envelope: &Value,
+        label: Option<&str>,
+    ) -> Result<Value, CallError> {
         let domain_v = envelope.get("domain").cloned().unwrap_or(Value::Null);
         let payload = envelope.get("payload").cloned().unwrap_or(Value::Null);
-        let signature = envelope.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+        let signature = envelope
+            .get("signature")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if !domain_ok(&domain_v, "register_key") {
-            return Err(CallError::new(400, "domain_mismatch", "注册挑战的 domain 不正确"));
+            return Err(CallError::new(
+                400,
+                "domain_mismatch",
+                "注册挑战的 domain 不正确",
+            ));
         }
-        let public_b64 = payload.get("public_key").and_then(|v| v.as_str()).unwrap_or("");
+        let public_b64 = payload
+            .get("public_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let alg = payload.get("alg").and_then(|v| v.as_str()).unwrap_or("");
         if alg != "ed25519" || public_b64.is_empty() {
             return Err(CallError::new(400, "bad_signature", "需要 ed25519 公钥"));
         }
-        let raw = b64url_decode(public_b64).map_err(|_| CallError::new(400, "bad_signature", "公钥不是 base64url"))?;
+        let raw = b64url_decode(public_b64)
+            .map_err(|_| CallError::new(400, "bad_signature", "公钥不是 base64url"))?;
         if raw.len() != 32 {
             return Err(CallError::new(400, "bad_signature", "公钥长度不正确"));
         }
@@ -562,8 +961,12 @@ impl App {
         if !verify_value(public_b64, &domain_v, &payload, signature) {
             return Err(CallError::new(400, "bad_signature", "持有证明签名无效"));
         }
-        let challenge_id = payload.get("challenge_id").and_then(|v| v.as_str()).unwrap_or("");
-        let cid = Uuid::parse_str(challenge_id).map_err(|_| CallError::new(400, "context_mismatch", "challenge_id 无效"))?;
+        let challenge_id = payload
+            .get("challenge_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let cid = Uuid::parse_str(challenge_id)
+            .map_err(|_| CallError::new(400, "context_mismatch", "challenge_id 无效"))?;
         let row = sqlx::query_as::<_, (String, Value, DateTime<Utc>, Option<DateTime<Utc>>)>(
             "SELECT nonce, payload, expires_at, used_at FROM key_challenges WHERE id = $1 AND agent_id = $2",
         )
@@ -587,24 +990,35 @@ impl App {
             return Err(CallError::new(400, "context_mismatch", "挑战内容不匹配"));
         }
         let _ = stored;
-        let existing: Option<String> = sqlx::query_scalar("SELECT public_key_b64 FROM agent_keys WHERE kid = $1")
-            .bind(kid)
-            .fetch_optional(self.pool())
-            .await
-            .map_err(db_err)?;
+        let existing: Option<String> =
+            sqlx::query_scalar("SELECT public_key_b64 FROM agent_keys WHERE kid = $1")
+                .bind(kid)
+                .fetch_optional(self.pool())
+                .await
+                .map_err(db_err)?;
         if let Some(prev) = existing {
             if prev == public_b64 {
                 return Ok(json!({"ok": true, "kid": kid, "idempotent": true}));
             }
-            return Err(CallError::new(409, "key_mismatch", "这个 kid 已属于其他密钥"));
+            return Err(CallError::new(
+                409,
+                "key_mismatch",
+                "这个 kid 已属于其他密钥",
+            ));
         }
-        let active: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM agent_keys WHERE agent_id = $1 AND status = 'active'")
-            .bind(agent.agent_id)
-            .fetch_one(self.pool())
-            .await
-            .map_err(db_err)?;
+        let active: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM agent_keys WHERE agent_id = $1 AND status = 'active'",
+        )
+        .bind(agent.agent_id)
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)?;
         if active >= 3 {
-            return Err(CallError::new(400, "too_many_keys", "每个智能体最多 3 把有效密钥"));
+            return Err(CallError::new(
+                400,
+                "too_many_keys",
+                "每个智能体最多 3 把有效密钥",
+            ));
         }
         let sig = b64url_decode(signature).unwrap_or_default();
         let mut tx = self.pool().begin().await.map_err(db_err)?;
@@ -632,7 +1046,10 @@ impl App {
     }
 
     pub async fn create_room(&self, agent: &AgentCtx, body: &Value) -> Result<Value, CallError> {
-        let game_id = body.get("game").and_then(|v| v.as_str()).unwrap_or("gomoku");
+        let game_id = body
+            .get("game")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gomoku");
         let live = self.resolve_game(game_id)?;
         if !live.playable {
             let message = if live.manifest.engine == "js-sandbox" {
@@ -643,13 +1060,24 @@ impl App {
             return Err(CallError::new(400, "game_not_playable", message));
         }
         let manifest = live.manifest;
-        let variant = body.get("variant").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| {
-            manifest.variants.first().map(|v| v.id.clone()).unwrap_or_else(|| "standard".into())
-        });
+        let variant = body
+            .get("variant")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                manifest
+                    .variants
+                    .first()
+                    .map(|v| v.id.clone())
+                    .unwrap_or_else(|| "standard".into())
+            });
         if !manifest.variants.iter().any(|v| v.id == variant) {
             return Err(CallError::new(400, "bad_variant", "未知变体"));
         }
-        let time_limit_sec = body.get("time_limit_sec").and_then(|v| v.as_i64()).unwrap_or(60);
+        let time_limit_sec = body
+            .get("time_limit_sec")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(60);
         if !(5..=600).contains(&time_limit_sec) {
             return Err(CallError::new(400, "invalid_time", "单步时限需在 5–600 秒"));
         }
@@ -657,15 +1085,31 @@ impl App {
             .get("timeout_policy")
             .and_then(|v| v.as_str())
             .unwrap_or(manifest.timeout_policy.as_str());
-        if !manifest.allowed_timeout_policies.iter().any(|p| p.as_str() == policy) {
-            return Err(CallError::new(400, "bad_policy", "这款游戏不允许该超时策略"));
+        if !manifest
+            .allowed_timeout_policies
+            .iter()
+            .any(|p| p.as_str() == policy)
+        {
+            return Err(CallError::new(
+                400,
+                "bad_policy",
+                "这款游戏不允许该超时策略",
+            ));
         }
-        let max_to = body.get("max_consecutive_timeouts").and_then(|v| v.as_i64()).unwrap_or(3);
+        let max_to = body
+            .get("max_consecutive_timeouts")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(3);
         if !(0..=20).contains(&max_to) {
             return Err(CallError::new(400, "bad_policy", "连续超时上限需在 0–20"));
         }
-        let allow_comments = body.get("allow_comments").and_then(|v| v.as_bool()).unwrap_or(true);
-        let kid = self.resolve_key(agent, body.get("kid").and_then(|v| v.as_str())).await?;
+        let allow_comments = body
+            .get("allow_comments")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let kid = self
+            .resolve_key(agent, body.get("kid").and_then(|v| v.as_str()))
+            .await?;
         self.ensure_free(agent).await?;
         self.ensure_not_queued(agent).await?;
         let match_id = Uuid::new_v4();
@@ -717,7 +1161,12 @@ impl App {
         }))
     }
 
-    pub async fn join_room(&self, agent: &AgentCtx, code: &str, kid: Option<&str>) -> Result<Value, CallError> {
+    pub async fn join_room(
+        &self,
+        agent: &AgentCtx,
+        code: &str,
+        kid: Option<&str>,
+    ) -> Result<Value, CallError> {
         let code = code.trim().to_uppercase();
         let kid = self.resolve_key(agent, kid).await?;
         self.ensure_free(agent).await?;
@@ -735,16 +1184,21 @@ impl App {
         let Some((match_id, status, game_id, mode, n)) = row else {
             return Err(CallError::new(404, "not_found", "找不到这个房间码"));
         };
-        let max = self.resolve_game(&game_id).map(|g| i64::from(g.manifest.max_players)).unwrap_or(2);
+        let max = self
+            .resolve_game(&game_id)
+            .map(|g| i64::from(g.manifest.max_players))
+            .unwrap_or(2);
         if status != "waiting" || n >= max {
             return Err(CallError::new(409, "room_full", "房间已满或已开始"));
         }
-        let already: Option<i16> = sqlx::query_scalar("SELECT seat FROM match_players WHERE match_id = $1 AND agent_id = $2")
-            .bind(match_id)
-            .bind(agent.agent_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_err)?;
+        let already: Option<i16> = sqlx::query_scalar(
+            "SELECT seat FROM match_players WHERE match_id = $1 AND agent_id = $2",
+        )
+        .bind(match_id)
+        .bind(agent.agent_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
         if already.is_some() {
             return Err(CallError::new(409, "already_seated", "你已经在这个房间里"));
         }
@@ -758,7 +1212,11 @@ impl App {
             .await
             .map_err(db_err)?;
             if same_owner.is_some() {
-                return Err(CallError::new(409, "same_owner", "排位不能和自己的另一个智能体同桌"));
+                return Err(CallError::new(
+                    409,
+                    "same_owner",
+                    "排位不能和自己的另一个智能体同桌",
+                ));
             }
         }
         let seat = n as i16;
@@ -781,9 +1239,14 @@ impl App {
         }
         tx.commit().await.map_err(db_err)?;
         if starting {
-            spawn_room(self.pool().clone(), self.server().clone(), &self.inner.hub, match_id)
-                .await
-                .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
+            spawn_room(
+                self.pool().clone(),
+                self.server().clone(),
+                &self.inner.hub,
+                match_id,
+            )
+            .await
+            .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
         }
         Ok(json!({
             "match_id": match_id,
@@ -816,11 +1279,12 @@ impl App {
     }
 
     async fn ensure_not_queued(&self, agent: &AgentCtx) -> Result<(), CallError> {
-        let queued: Option<Uuid> = sqlx::query_scalar("SELECT id FROM match_queue WHERE agent_id = $1")
-            .bind(agent.agent_id)
-            .fetch_optional(self.pool())
-            .await
-            .map_err(db_err)?;
+        let queued: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM match_queue WHERE agent_id = $1")
+                .bind(agent.agent_id)
+                .fetch_optional(self.pool())
+                .await
+                .map_err(db_err)?;
         if queued.is_some() {
             return Err(CallError::new(409, "queued", "这个智能体正在排位队列里"));
         }
@@ -839,7 +1303,11 @@ impl App {
         .await
         .map_err(db_err)?;
         if existing.is_some() {
-            return Err(CallError::new(409, "already_seated", "这个智能体已经在另一局里"));
+            return Err(CallError::new(
+                409,
+                "already_seated",
+                "这个智能体已经在另一局里",
+            ));
         }
         Ok(())
     }
@@ -853,11 +1321,12 @@ impl App {
                     .map(|_| ALPH[rng.gen_range(0..ALPH.len())] as char)
                     .collect()
             };
-            let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM matches WHERE room_code = $1")
-                .bind(&code)
-                .fetch_optional(self.pool())
-                .await
-                .map_err(db_err)?;
+            let exists: Option<Uuid> =
+                sqlx::query_scalar("SELECT id FROM matches WHERE room_code = $1")
+                    .bind(&code)
+                    .fetch_optional(self.pool())
+                    .await
+                    .map_err(db_err)?;
             if exists.is_none() {
                 return Ok(code);
             }
@@ -887,13 +1356,23 @@ impl App {
         body["seat"] = json!(seat);
         body["legal_actions"] = json!([]);
         body["signing_request"] = Value::Null;
-        body["phase"] = json!(if body["status"] == "finished" || body["status"] == "aborted" { "game_over" } else { "waiting" });
+        body["phase"] = json!(
+            if body["status"] == "finished" || body["status"] == "aborted" {
+                "game_over"
+            } else {
+                "waiting"
+            }
+        );
         body["remaining_ms"] = json!(0);
         body["consecutive_timeouts"] = json!(0);
         Ok(body)
     }
 
-    pub async fn wait_for_turn(&self, agent: &AgentCtx, match_id: Uuid) -> Result<Value, CallError> {
+    pub async fn wait_for_turn(
+        &self,
+        agent: &AgentCtx,
+        match_id: Uuid,
+    ) -> Result<Value, CallError> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(25);
         loop {
             let slot = self.inner.hub.slot(match_id);
@@ -918,11 +1397,19 @@ impl App {
         }
     }
 
-    pub async fn make_move(&self, agent: &AgentCtx, match_id: Uuid, envelope: Value, private: Option<Value>) -> Result<Value, CallError> {
+    pub async fn make_move(
+        &self,
+        agent: &AgentCtx,
+        match_id: Uuid,
+        envelope: Value,
+        private: Option<Value>,
+    ) -> Result<Value, CallError> {
         self.touch(agent.agent_id).await;
         self.ensure_actor(match_id).await?;
         let Some(tx) = self.inner.hub.sender(match_id) else {
-            return Ok(json!({"accepted": false, "error": "game_over", "message": "对局不在进行中"}));
+            return Ok(
+                json!({"accepted": false, "error": "game_over", "message": "对局不在进行中"}),
+            );
         };
         roundtrip(&tx, |reply| Cmd::Move {
             agent_id: agent.agent_id,
@@ -937,7 +1424,9 @@ impl App {
         self.touch(agent.agent_id).await;
         self.ensure_actor(match_id).await?;
         let Some(tx) = self.inner.hub.sender(match_id) else {
-            return Ok(json!({"accepted": false, "error": "game_over", "message": "对局不在进行中"}));
+            return Ok(
+                json!({"accepted": false, "error": "game_over", "message": "对局不在进行中"}),
+            );
         };
         roundtrip(&tx, |reply| Cmd::Resign {
             agent_id: agent.agent_id,
@@ -948,28 +1437,49 @@ impl App {
 
     pub async fn join_queue(&self, agent: &AgentCtx, body: &Value) -> Result<Value, CallError> {
         if !agent.scopes.iter().any(|s| s == "play:ranked") {
-            return Err(CallError::new(403, "ranked_forbidden", "这个令牌没有排位权限"));
+            return Err(CallError::new(
+                403,
+                "ranked_forbidden",
+                "这个令牌没有排位权限",
+            ));
         }
         if let Some(found) = self.ranked_seat(agent.agent_id).await? {
             return Ok(found);
         }
-        let game_id = body.get("game").and_then(|v| v.as_str()).unwrap_or("gomoku");
+        let game_id = body
+            .get("game")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gomoku");
         let live = self.resolve_game(game_id)?;
         if !live.playable {
-            return Err(CallError::new(400, "game_not_playable", "这款游戏还不能排位"));
+            return Err(CallError::new(
+                400,
+                "game_not_playable",
+                "这款游戏还不能排位",
+            ));
         }
         let manifest = live.manifest;
         if !manifest.rated {
             return Err(CallError::new(400, "unrated", "这款游戏不计入天梯"));
         }
-        let variant = body.get("variant").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| {
-            manifest.variants.first().map(|v| v.id.clone()).unwrap_or_else(|| "standard".into())
-        });
+        let variant = body
+            .get("variant")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                manifest
+                    .variants
+                    .first()
+                    .map(|v| v.id.clone())
+                    .unwrap_or_else(|| "standard".into())
+            });
         if !manifest.variants.iter().any(|v| v.id == variant) {
             return Err(CallError::new(400, "bad_variant", "未知变体"));
         }
         self.ensure_free(agent).await?;
-        let kid = self.resolve_key(agent, body.get("kid").and_then(|v| v.as_str())).await?;
+        let kid = self
+            .resolve_key(agent, body.get("kid").and_then(|v| v.as_str()))
+            .await?;
         let rating = self.display_rating(agent.agent_id, game_id).await?;
         let id = Uuid::new_v4();
         sqlx::query(
@@ -988,7 +1498,9 @@ impl App {
         .execute(self.pool())
         .await
         .map_err(db_err)?;
-        self.matchmake_once().await.map_err(|err| CallError::new(500, "matchmaker", err.to_string()))?;
+        self.matchmake_once()
+            .await
+            .map_err(|err| CallError::new(500, "matchmaker", err.to_string()))?;
         if let Some(found) = self.ranked_seat(agent.agent_id).await? {
             return Ok(found);
         }
@@ -1054,53 +1566,83 @@ impl App {
         .await?;
         let mut groups: HashMap<(String, String), Vec<QueueRow>> = HashMap::new();
         for row in rows {
-            groups.entry((row.game_id.clone(), row.variant.clone())).or_default().push(row);
+            groups
+                .entry((row.game_id.clone(), row.variant.clone()))
+                .or_default()
+                .push(row);
         }
         for ((game_id, variant), waiting) in groups {
-            let Some(game) = registry().get(&game_id) else { continue };
+            let Some(game) = registry().get(&game_id) else {
+                continue;
+            };
             let manifest = game.manifest();
             let need = manifest.max_players as usize;
-            if waiting.len() < need { continue };
+            if waiting.len() < need {
+                continue;
+            };
             let mut used = vec![false; waiting.len()];
             let mut batch = Vec::new();
             for i in 0..waiting.len() {
-                if used[i] { continue; }
+                if used[i] {
+                    continue;
+                }
                 let mut group = vec![i];
                 let mut owners = vec![waiting[i].owner_id];
-                let mut rest: Vec<usize> = (0..waiting.len()).filter(|j| *j != i && !used[*j]).collect();
+                let mut rest: Vec<usize> = (0..waiting.len())
+                    .filter(|j| *j != i && !used[*j])
+                    .collect();
                 rest.sort_by(|&a, &b| {
                     let da = (waiting[a].rating - waiting[i].rating).abs();
                     let db = (waiting[b].rating - waiting[i].rating).abs();
                     da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
                 });
                 for j in rest {
-                    if owners.contains(&waiting[j].owner_id) { continue; }
+                    if owners.contains(&waiting[j].owner_id) {
+                        continue;
+                    }
                     let fits = group.iter().all(|&g| {
                         let diff = (waiting[g].rating - waiting[j].rating).abs();
-                        diff <= window_of(waiting[g].enqueued_at).max(window_of(waiting[j].enqueued_at))
+                        diff <= window_of(waiting[g].enqueued_at)
+                            .max(window_of(waiting[j].enqueued_at))
                     });
                     if fits {
                         owners.push(waiting[j].owner_id);
                         group.push(j);
-                        if group.len() == need { break; }
+                        if group.len() == need {
+                            break;
+                        }
                     }
                 }
                 if group.len() == need {
-                    for g in &group { used[*g] = true; }
-                    let picked: Vec<QueueRow> = group.into_iter().map(|i| waiting[i].clone()).collect();
+                    for g in &group {
+                        used[*g] = true;
+                    }
+                    let picked: Vec<QueueRow> =
+                        group.into_iter().map(|i| waiting[i].clone()).collect();
                     batch.push(picked);
                 }
             }
             let _ = waiting;
             for picked in batch {
-                self.start_ranked(&game_id, &variant, &manifest, &picked).await?;
+                self.start_ranked(&game_id, &variant, &manifest, &picked)
+                    .await?;
             }
         }
         Ok(())
     }
 
-    async fn start_ranked(&self, game_id: &str, variant: &str, manifest: &crate::game::Manifest, picked: &[QueueRow]) -> anyhow::Result<()> {
-        let info = self.inner.games.get(game_id).ok_or_else(|| anyhow::anyhow!("missing game"))?;
+    async fn start_ranked(
+        &self,
+        game_id: &str,
+        variant: &str,
+        manifest: &crate::game::Manifest,
+        picked: &[QueueRow],
+    ) -> anyhow::Result<()> {
+        let info = self
+            .inner
+            .games
+            .get(game_id)
+            .ok_or_else(|| anyhow::anyhow!("missing game"))?;
         let match_id = Uuid::new_v4();
         let mut tx = self.pool().begin().await?;
         sqlx::query(
@@ -1139,12 +1681,20 @@ impl App {
                 .await?;
         }
         tx.commit().await?;
-        spawn_room(self.pool().clone(), self.server().clone(), &self.inner.hub, match_id).await?;
+        spawn_room(
+            self.pool().clone(),
+            self.server().clone(),
+            &self.inner.hub,
+            match_id,
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn leaderboard(&self, game: &str) -> Result<Value, CallError> {
-        crate::rating::leaderboard(self.pool(), game).await.map_err(|err| CallError::new(500, "leaderboard", err.to_string()))
+        crate::rating::leaderboard(self.pool(), game)
+            .await
+            .map_err(|err| CallError::new(500, "leaderboard", err.to_string()))
     }
 
     pub async fn user_profile(&self, handle: &str) -> Result<Value, CallError> {
@@ -1169,7 +1719,9 @@ impl App {
             listed.push(json!({"id": id, "name": name, "model_label": model, "ratings": ratings}));
         }
         let recent = self.recent_matches_for_user(user.0).await?;
-        Ok(json!({"user": {"handle": user.1, "created_at": user.2.timestamp_millis()}, "agents": listed, "recent": recent}))
+        Ok(
+            json!({"user": {"handle": user.1, "created_at": user.2.timestamp_millis()}, "agents": listed, "recent": recent}),
+        )
     }
 
     pub async fn agent_profile(&self, id: Uuid) -> Result<Value, CallError> {
@@ -1248,9 +1800,14 @@ impl App {
             return Err(CallError::new(404, "not_found", "找不到这局"));
         };
         if status == "running" {
-            spawn_room(self.pool().clone(), self.server().clone(), &self.inner.hub, match_id)
-                .await
-                .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
+            spawn_room(
+                self.pool().clone(),
+                self.server().clone(),
+                &self.inner.hub,
+                match_id,
+            )
+            .await
+            .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
         }
         Ok(())
     }
@@ -1273,7 +1830,19 @@ impl App {
     }
 
     pub async fn list_live(&self) -> Result<Vec<Value>, CallError> {
-        let rows = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<i32>, Option<Value>)>(
+        let rows = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<i32>,
+                Option<Value>,
+            ),
+        >(
             r#"SELECT m.id, m.game_id, g.name, m.status, m.room_code, m.variant, m.tip_seq, m.state
                FROM matches m JOIN games g ON g.id = m.game_id
                WHERE m.status IN ('waiting','running')
@@ -1298,7 +1867,14 @@ impl App {
             .map_err(db_err)?;
             let preview = state.as_ref().and_then(|s| {
                 registry().get(&game_id).and_then(|g| {
-                    g.view(s, &crate::game::Viewer { seat: None, omniscient: false }).ok()
+                    g.view(
+                        s,
+                        &crate::game::Viewer {
+                            seat: None,
+                            omniscient: false,
+                        },
+                    )
+                    .ok()
                 })
             });
             out.push(json!({
@@ -1384,7 +1960,10 @@ fn map_turn(view: &Value) -> Value {
     }
     let status = view.get("status").and_then(|v| v.as_str()).unwrap_or("");
     let phase = view.get("phase").and_then(|v| v.as_str()).unwrap_or("");
-    let your_turn = view.get("signing_request").map(|v| v.is_object()).unwrap_or(false);
+    let your_turn = view
+        .get("signing_request")
+        .map(|v| v.is_object())
+        .unwrap_or(false);
     let turn_status = if status == "finished" || status == "aborted" || phase == "game_over" {
         "game_over"
     } else if your_turn {
@@ -1457,7 +2036,8 @@ impl App {
             return Err(CallError::new(400, "too_large", "规则源码不能超过 256KB"));
         }
         self.charge_quota(user.id, false).await?;
-        let report = crate::sandbox::validate(source).map_err(|err| CallError::new(400, "rejected", err.0))?;
+        let report = crate::sandbox::validate(source)
+            .map_err(|err| CallError::new(400, "rejected", err.0))?;
         Ok(serde_json::to_value(&report).unwrap_or(json!({})))
     }
 
@@ -1471,7 +2051,11 @@ impl App {
     ) -> Result<Value, CallError> {
         let slug = slug.trim().to_lowercase();
         if !valid_slug(&slug) {
-            return Err(CallError::new(400, "bad_slug", "标识需为 3–32 位小写字母、数字或连字符，并以字母开头"));
+            return Err(CallError::new(
+                400,
+                "bad_slug",
+                "标识需为 3–32 位小写字母、数字或连字符，并以字母开头",
+            ));
         }
         if source.len() > crate::sandbox::MAX_SOURCE {
             return Err(CallError::new(400, "too_large", "规则源码不能超过 256KB"));
@@ -1481,11 +2065,19 @@ impl App {
             return Err(CallError::new(400, "reserved", "这个标识和内置游戏冲突"));
         }
         self.charge_quota(user.id, false).await?;
-        let report = crate::sandbox::validate(source).map_err(|err| CallError::new(400, "rejected", err.0))?;
+        let report = crate::sandbox::validate(source)
+            .map_err(|err| CallError::new(400, "rejected", err.0))?;
         if !report.ok {
-            return Err(CallError::new(400, "rejected", "校验没通过，先看检查结果再发布"));
+            return Err(CallError::new(
+                400,
+                "rejected",
+                "校验没通过，先看检查结果再发布",
+            ));
         }
-        let public = report.manifest.clone().ok_or_else(|| CallError::new(400, "rejected", "没有读到 manifest"))?;
+        let public = report
+            .manifest
+            .clone()
+            .ok_or_else(|| CallError::new(400, "rejected", "没有读到 manifest"))?;
         let existing = sqlx::query_as::<_, (Option<Uuid>, String, bool)>(
             "SELECT author_id, moderation, builtin FROM games WHERE id = $1",
         )
@@ -1501,7 +2093,11 @@ impl App {
                 return Err(CallError::new(403, "forbidden", "这款规则属于别的账号"));
             }
             if moderation == "hidden" {
-                return Err(CallError::new(403, "hidden", "管理员已隐藏这款规则，不能再发布"));
+                return Err(CallError::new(
+                    403,
+                    "hidden",
+                    "管理员已隐藏这款规则，不能再发布",
+                ));
             }
             let prev: Option<String> = sqlx::query_scalar(
                 "SELECT version FROM game_versions WHERE game_id = $1 ORDER BY created_at DESC LIMIT 1",
@@ -1515,8 +2111,9 @@ impl App {
             "1.0.0".into()
         };
         self.charge_quota(user.id, true).await?;
-        let (_manifest, mut stored) = crate::sandbox::publish_manifest(public, &id, &version, name, description)
-            .map_err(|err| CallError::new(400, "rejected", err.0))?;
+        let (_manifest, mut stored) =
+            crate::sandbox::publish_manifest(public, &id, &version, name, description)
+                .map_err(|err| CallError::new(400, "rejected", err.0))?;
         stored["authorId"] = json!(user.id);
         stored["uploaded"] = json!(true);
         let hash = crate::sandbox::rules_hash(&stored, source);
@@ -1550,7 +2147,11 @@ impl App {
             .await
             .map_err(db_err)?;
             if updated.rows_affected() == 0 {
-                return Err(CallError::new(403, "hidden", "管理员已隐藏这款规则，不能再发布"));
+                return Err(CallError::new(
+                    403,
+                    "hidden",
+                    "管理员已隐藏这款规则，不能再发布",
+                ));
             }
         }
         sqlx::query(
@@ -1585,11 +2186,13 @@ impl App {
     }
 
     pub async fn unpublish_game(&self, user: &User, id: &str) -> Result<Value, CallError> {
-        let row = sqlx::query_as::<_, (Option<Uuid>, bool)>("SELECT author_id, builtin FROM games WHERE id = $1")
-            .bind(id)
-            .fetch_optional(self.pool())
-            .await
-            .map_err(db_err)?;
+        let row = sqlx::query_as::<_, (Option<Uuid>, bool)>(
+            "SELECT author_id, builtin FROM games WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
         let Some((author, builtin)) = row else {
             return Err(CallError::new(404, "not_found", "没有这款规则"));
         };
@@ -1627,13 +2230,26 @@ impl App {
     }
 
     fn remember_upload(&self, info: UploadInfo) {
-        let id = info.manifest.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let mut map = self.inner.uploads.write().unwrap_or_else(|err| err.into_inner());
+        let id = info
+            .manifest
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let mut map = self
+            .inner
+            .uploads
+            .write()
+            .unwrap_or_else(|err| err.into_inner());
         map.insert(id, info);
     }
 
     fn mark_upload_unplayable(&self, id: &str) {
-        let mut map = self.inner.uploads.write().unwrap_or_else(|err| err.into_inner());
+        let mut map = self
+            .inner
+            .uploads
+            .write()
+            .unwrap_or_else(|err| err.into_inner());
         if let Some(info) = map.get_mut(id) {
             info.playable = false;
             if let Some(obj) = info.manifest.as_object_mut() {
@@ -1674,9 +2290,18 @@ fn bump_version(prev: Option<&str>) -> String {
         return "1.0.0".into();
     };
     let mut parts = prev.split('.');
-    let major = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(1);
-    let minor = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
-    let patch = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+    let major = parts
+        .next()
+        .and_then(|p| p.parse::<u32>().ok())
+        .unwrap_or(1);
+    let minor = parts
+        .next()
+        .and_then(|p| p.parse::<u32>().ok())
+        .unwrap_or(0);
+    let patch = parts
+        .next()
+        .and_then(|p| p.parse::<u32>().ok())
+        .unwrap_or(0);
     format!("{major}.{minor}.{}", patch + 1)
 }
 
@@ -1684,7 +2309,9 @@ fn valid_slug(slug: &str) -> bool {
     let bytes = slug.as_bytes();
     (3..=32).contains(&bytes.len())
         && bytes.first().is_some_and(|c| c.is_ascii_lowercase())
-        && bytes.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+        && bytes
+            .iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
 async fn load_uploads(pool: &PgPool) -> anyhow::Result<HashMap<String, UploadInfo>> {
@@ -1735,12 +2362,78 @@ fn verify_password(hash: &str, password: &str) -> bool {
     let Ok(parsed) = PasswordHash::new(hash) else {
         return false;
     };
-    Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok()
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok()
 }
 
 fn valid_handle(handle: &str) -> bool {
     let n = handle.chars().count();
-    (3..=20).contains(&n) && handle.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    (3..=20).contains(&n)
+        && handle
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+pub(crate) fn github_handle(login: &str) -> String {
+    let mut s = String::new();
+    for c in login.chars() {
+        let c = c.to_ascii_lowercase();
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            s.push(c);
+        } else if !s.ends_with('_') {
+            s.push('_');
+        }
+    }
+    let mut base = s.trim_matches('_').to_string();
+    if base.len() > 20 {
+        base.truncate(20);
+        base = base.trim_end_matches('_').to_string();
+    }
+    if base.len() < 3 {
+        base = format!("gh{base}");
+    }
+    if base.len() > 20 {
+        base.truncate(20);
+        base = base.trim_end_matches('_').to_string();
+    }
+    if valid_handle(&base) {
+        base
+    } else {
+        "ghuser".into()
+    }
+}
+
+fn suffixed_handle(base: &str, n: u32) -> String {
+    if n == 0 {
+        return base.to_string();
+    }
+    let suffix = n.to_string();
+    let keep = 20usize.saturating_sub(suffix.len()).max(1);
+    let mut head: String = base.chars().take(keep).collect();
+    head = head.trim_end_matches('_').to_string();
+    if head.is_empty() {
+        head = "gh".into();
+    }
+    let mut out = format!("{head}{suffix}");
+    if out.chars().count() > 20 {
+        out = out.chars().take(20).collect();
+    }
+    if valid_handle(&out) {
+        out
+    } else {
+        format!("ghuser{n}")
+    }
+}
+
+fn unique_constraint(err: &sqlx::Error) -> Option<String> {
+    let sqlx::Error::Database(db) = err else {
+        return None;
+    };
+    if db.code().as_deref() != Some("23505") {
+        return None;
+    }
+    Some(db.constraint().unwrap_or("").to_string())
 }
 
 fn admin_email(email: &str) -> bool {
@@ -1773,3 +2466,21 @@ fn _now() -> i64 {
 
 #[allow(dead_code)]
 async fn _touch_tx(_tx: &mut Transaction<'_, Postgres>) {}
+
+#[cfg(test)]
+mod handle_tests {
+    use super::{github_handle, suffixed_handle, valid_handle};
+
+    #[test]
+    fn github_login_becomes_a_handle() {
+        assert_eq!(github_handle("OctoCat"), "octocat");
+        assert_eq!(github_handle("ab"), "ghab");
+        assert_eq!(github_handle("a--b_c"), "a_b_c");
+        let long = github_handle("abcdefghijklmnopqrstuvwxyz");
+        assert!(valid_handle(&long));
+        assert!(long.len() <= 20);
+        let suffixed = suffixed_handle(&long, 2);
+        assert!(valid_handle(&suffixed));
+        assert!(suffixed.ends_with('2'));
+    }
+}

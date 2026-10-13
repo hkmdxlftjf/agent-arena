@@ -34,11 +34,22 @@ impl Go {
         serde_json::from_value(state.clone()).map_err(|e| GameError(e.to_string()))
     }
 
-    fn new(size: usize) -> GState {
+    fn empty(size: usize) -> GState {
         let komi = if size == 9 { 7.0 } else { 7.5 };
         let board = vec![0u8; size * size];
         let history = vec![key(&board)];
-        GState { size, komi, board, turn: 0, passes: 0, history, last: None, winner: None, reason: None, score: None }
+        GState {
+            size,
+            komi,
+            board,
+            turn: 0,
+            passes: 0,
+            history,
+            last: None,
+            winner: None,
+            reason: None,
+            score: None,
+        }
     }
 }
 
@@ -72,10 +83,18 @@ fn i_of(size: usize, x: usize, y: usize) -> usize {
 
 fn neighbors(size: usize, x: usize, y: usize) -> Vec<(usize, usize)> {
     let mut v = Vec::new();
-    if x > 0 { v.push((x - 1, y)); }
-    if y > 0 { v.push((x, y - 1)); }
-    if x + 1 < size { v.push((x + 1, y)); }
-    if y + 1 < size { v.push((x, y + 1)); }
+    if x > 0 {
+        v.push((x - 1, y));
+    }
+    if y > 0 {
+        v.push((x, y - 1));
+    }
+    if x + 1 < size {
+        v.push((x + 1, y));
+    }
+    if y + 1 < size {
+        v.push((x, y + 1));
+    }
     v
 }
 
@@ -91,7 +110,9 @@ fn group_and_libs(board: &[u8], size: usize, x: usize, y: usize) -> (Vec<(usize,
         for (nx, ny) in neighbors(size, cx, cy) {
             let ni = i_of(size, nx, ny);
             match board[ni] {
-                0 => { libs.insert(ni); }
+                0 => {
+                    libs.insert(ni);
+                }
                 c if c == color && !seen[ni] => {
                     seen[ni] = true;
                     stack.push((nx, ny));
@@ -103,7 +124,14 @@ fn group_and_libs(board: &[u8], size: usize, x: usize, y: usize) -> (Vec<(usize,
     (group, libs.len())
 }
 
-fn place(board: &mut [u8], size: usize, x: usize, y: usize, color: u8, history: &[String]) -> Result<(), &'static str> {
+fn place(
+    board: &mut [u8],
+    size: usize,
+    x: usize,
+    y: usize,
+    color: u8,
+    history: &[String],
+) -> Result<(), &'static str> {
     if board[i_of(size, x, y)] != 0 {
         return Err("这里已有棋子");
     }
@@ -141,9 +169,15 @@ fn score_area(board: &[u8], size: usize, komi: f64) -> (f64, f64) {
     for y in 0..size {
         for x in 0..size {
             let c = board[i_of(size, x, y)];
-            if c == 1 { black += 1.0; }
-            if c == 2 { white += 1.0; }
-            if c != 0 || seen[i_of(size, x, y)] { continue; }
+            if c == 1 {
+                black += 1.0;
+            }
+            if c == 2 {
+                white += 1.0;
+            }
+            if c != 0 || seen[i_of(size, x, y)] {
+                continue;
+            }
             let mut stack = vec![(x, y)];
             seen[i_of(size, x, y)] = true;
             let mut cells = 0.0;
@@ -153,15 +187,22 @@ fn score_area(board: &[u8], size: usize, komi: f64) -> (f64, f64) {
                 for (nx, ny) in neighbors(size, cx, cy) {
                     let ni = i_of(size, nx, ny);
                     match board[ni] {
-                        0 if !seen[ni] => { seen[ni] = true; stack.push((nx, ny)); }
+                        0 if !seen[ni] => {
+                            seen[ni] = true;
+                            stack.push((nx, ny));
+                        }
                         1 => touch[0] = true,
                         2 => touch[1] = true,
                         _ => {}
                     }
                 }
             }
-            if touch[0] && !touch[1] { black += cells; }
-            if touch[1] && !touch[0] { white += cells; }
+            if touch[0] && !touch[1] {
+                black += cells;
+            }
+            if touch[1] && !touch[0] {
+                white += cells;
+            }
         }
     }
     white += komi;
@@ -193,11 +234,27 @@ impl Game for Go {
             max_players: 2,
             traits: vec![Trait::Board, Trait::MultiPhase],
             variants: vec![
-                Variant { id: "9".into(), name: "9 路 · 贴 7 目".into(), options: None },
-                Variant { id: "13".into(), name: "13 路 · 贴 7.5 目".into(), options: None },
-                Variant { id: "19".into(), name: "19 路 · 贴 7.5 目".into(), options: None },
+                Variant {
+                    id: "9".into(),
+                    name: "9 路 · 贴 7 目".into(),
+                    options: None,
+                },
+                Variant {
+                    id: "13".into(),
+                    name: "13 路 · 贴 7.5 目".into(),
+                    options: None,
+                },
+                Variant {
+                    id: "19".into(),
+                    name: "19 路 · 贴 7.5 目".into(),
+                    options: None,
+                },
             ],
-            default_time: TimeControl { per_action_ms: 60_000, max_consecutive_timeouts: 3, grace_ms: 2_000 },
+            default_time: TimeControl {
+                per_action_ms: 60_000,
+                max_consecutive_timeouts: 3,
+                grace_ms: 2_000,
+            },
             timeout_policy: TimeoutPolicy::AutoPass,
             allowed_timeout_policies: vec![TimeoutPolicy::AutoPass, TimeoutPolicy::Forfeit],
             action_schema: json!({"type":"object"}),
@@ -217,12 +274,18 @@ impl Game for Go {
             "19" => 19,
             _ => return Err(GameError("未知路数".into())),
         };
-        Ok((serde_json::to_value(Self::new(size)).unwrap(), Vec::new()))
+        Ok((serde_json::to_value(Self::empty(size)).unwrap(), Vec::new()))
     }
 
     fn to_act(&self, state: &Value) -> Vec<Seat> {
-        let Ok(s) = Self::load(state) else { return Vec::new() };
-        if s.winner.is_some() { Vec::new() } else { vec![s.turn as Seat] }
+        let Ok(s) = Self::load(state) else {
+            return Vec::new();
+        };
+        if s.winner.is_some() {
+            Vec::new()
+        } else {
+            vec![s.turn as Seat]
+        }
     }
 
     fn view(&self, state: &Value, _: &Viewer) -> Result<Value, GameError> {
@@ -271,7 +334,13 @@ impl Game for Go {
         Ok(actions)
     }
 
-    fn apply(&self, state: &Value, seat: Seat, action: &Value, _: &mut dyn ArenaRng) -> Result<(Value, Vec<Value>), GameError> {
+    fn apply(
+        &self,
+        state: &Value,
+        seat: Seat,
+        action: &Value,
+        _: &mut dyn ArenaRng,
+    ) -> Result<(Value, Vec<Value>), GameError> {
         let mut s = Self::load(state)?;
         if s.winner.is_some() {
             return Err(GameError("对局已结束".into()));
@@ -279,7 +348,11 @@ impl Game for Go {
         let kind = action.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if kind == "resign" || kind == "timeout_forfeit" {
             s.winner = Some(1 - seat as i8);
-            s.reason = Some(if kind == "resign" { "resign".into() } else { "timeout".into() });
+            s.reason = Some(if kind == "resign" {
+                "resign".into()
+            } else {
+                "timeout".into()
+            });
             return Ok((serde_json::to_value(s).unwrap(), Vec::new()));
         }
         if seat as u8 != s.turn {
@@ -297,9 +370,12 @@ impl Game for Go {
         if kind != "place" {
             return Err(GameError("未知动作".into()));
         }
-        let at = action["data"]["at"].as_str().ok_or_else(|| GameError("缺少坐标".into()))?;
+        let at = action["data"]["at"]
+            .as_str()
+            .ok_or_else(|| GameError("缺少坐标".into()))?;
         let (x, y) = parse_at(s.size, at).ok_or_else(|| GameError("坐标不合法".into()))?;
-        place(&mut s.board, s.size, x, y, s.turn + 1, &s.history).map_err(|m| GameError(m.into()))?;
+        place(&mut s.board, s.size, x, y, s.turn + 1, &s.history)
+            .map_err(|m| GameError(m.into()))?;
         s.history.push(key(&s.board));
         s.passes = 0;
         s.last = Some(at_name(s.size, x, y));
@@ -308,7 +384,9 @@ impl Game for Go {
     }
 
     fn is_terminal(&self, state: &Value) -> bool {
-        Self::load(state).map(|s| s.winner.is_some()).unwrap_or(true)
+        Self::load(state)
+            .map(|s| s.winner.is_some())
+            .unwrap_or(true)
     }
 
     fn result(&self, state: &Value) -> Result<GameResult, GameError> {
@@ -319,14 +397,31 @@ impl Game for Go {
             1 => (vec![0.0, 1.0], vec![vec![1], vec![0]]),
             _ => (vec![0.5, 0.5], vec![vec![0, 1]]),
         };
-        Ok(GameResult { scores, ranking, teams: None, reason: s.reason.unwrap_or_else(|| "score".into()) })
+        Ok(GameResult {
+            scores,
+            ranking,
+            teams: None,
+            reason: s.reason.unwrap_or_else(|| "score".into()),
+        })
     }
 
-    fn timeout_decision(&self, _: &Value, _: Seat, policy: TimeoutPolicy, _: &mut dyn ArenaRng) -> Result<TimeoutDecision, GameError> {
+    fn timeout_decision(
+        &self,
+        _: &Value,
+        _: Seat,
+        policy: TimeoutPolicy,
+        _: &mut dyn ArenaRng,
+    ) -> Result<TimeoutDecision, GameError> {
         if policy == TimeoutPolicy::Forfeit {
-            return Ok(TimeoutDecision { policy, action: Some(json!({"type":"resign"})) });
+            return Ok(TimeoutDecision {
+                policy,
+                action: Some(json!({"type":"resign"})),
+            });
         }
-        Ok(TimeoutDecision { policy: TimeoutPolicy::AutoPass, action: Some(json!({"type":"pass"})) })
+        Ok(TimeoutDecision {
+            policy: TimeoutPolicy::AutoPass,
+            action: Some(json!({"type":"pass"})),
+        })
     }
 }
 
@@ -344,7 +439,11 @@ mod tests {
     use super::*;
 
     fn cfg(v: &str) -> Config {
-        Config { players: 2, variant: v.into(), options: json!({}) }
+        Config {
+            players: 2,
+            variant: v.into(),
+            options: json!({}),
+        }
     }
 
     #[test]
@@ -352,16 +451,31 @@ mod tests {
         let g = Go;
         let mut rng = crate::game::SeededRng::from_seed_seq(&[8; 32], 0);
         let (mut state, _) = g.setup(&cfg("9"), &mut rng).unwrap();
-        let plays = [(0i32, "D5"), (1, "D4"), (0, "C4"), (1, "pass"), (0, "E4"), (1, "pass"), (0, "D3")];
+        let plays = [
+            (0i32, "D5"),
+            (1, "D4"),
+            (0, "C4"),
+            (1, "pass"),
+            (0, "E4"),
+            (1, "pass"),
+            (0, "D3"),
+        ];
         for (seat, at) in plays {
-            let action = if at == "pass" { json!({"type":"pass"}) } else { json!({"type":"place","data":{"at": at}}) };
+            let action = if at == "pass" {
+                json!({"type":"pass"})
+            } else {
+                json!({"type":"place","data":{"at": at}})
+            };
             // passes switch turn; the scripted seats must match.
             let s = Go::load(&state).unwrap();
             assert_eq!(s.turn, seat as u8, "turn before {at}");
             state = g.apply(&state, seat, &action, &mut rng).unwrap().0;
         }
         let s = Go::load(&state).unwrap();
-        assert!(s.board.iter().all(|c| *c != 2), "white stone should be captured");
+        assert!(
+            s.board.iter().all(|c| *c != 2),
+            "white stone should be captured"
+        );
 
         // Ko: retake immediately is illegal.
         let mut board = vec![0u8; 81];
@@ -379,21 +493,50 @@ mod tests {
         set(&mut board, "D3", 2);
         // white to play D5 captures D4
         let mut history = vec![key(&board)];
-        place(&mut board, 9, parse_at(9, "D5").unwrap().0, parse_at(9, "D5").unwrap().1, 2, &history).unwrap();
+        place(
+            &mut board,
+            9,
+            parse_at(9, "D5").unwrap().0,
+            parse_at(9, "D5").unwrap().1,
+            2,
+            &history,
+        )
+        .unwrap();
         history.push(key(&board));
         let (x, y) = parse_at(9, "D4").unwrap();
         let err = place(&mut board, 9, x, y, 1, &history);
-        assert!(err.is_err(), "positional superko blocks the immediate retake");
+        assert!(
+            err.is_err(),
+            "positional superko blocks the immediate retake"
+        );
 
         let g = Go;
         let mut rng = crate::game::SeededRng::from_seed_seq(&[1; 32], 0);
         let (mut state, _) = g.setup(&cfg("9"), &mut rng).unwrap();
-        state = g.apply(&state, 0, &json!({"type":"place","data":{"at":"D4"}}), &mut rng).unwrap().0;
-        state = g.apply(&state, 1, &json!({"type":"pass"}), &mut rng).unwrap().0;
-        state = g.apply(&state, 0, &json!({"type":"pass"}), &mut rng).unwrap().0;
+        state = g
+            .apply(
+                &state,
+                0,
+                &json!({"type":"place","data":{"at":"D4"}}),
+                &mut rng,
+            )
+            .unwrap()
+            .0;
+        state = g
+            .apply(&state, 1, &json!({"type":"pass"}), &mut rng)
+            .unwrap()
+            .0;
+        state = g
+            .apply(&state, 0, &json!({"type":"pass"}), &mut rng)
+            .unwrap()
+            .0;
         assert!(g.is_terminal(&state));
         let result = g.result(&state).unwrap();
-        assert_eq!(result.reason.starts_with("black") || result.reason.starts_with("white") || result.reason.starts_with("draw"), true);
+        assert!(
+            result.reason.starts_with("black")
+                || result.reason.starts_with("white")
+                || result.reason.starts_with("draw")
+        );
         let s = Go::load(&state).unwrap();
         let (b, w) = s.score.unwrap();
         assert!(b > 1.0);

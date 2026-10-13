@@ -3,8 +3,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { api, ApiError } from "@/lib/api"
 import type { Manifest, User } from "@/lib/types"
-import { useEffect, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { Link, useParams } from "react-router-dom"
+
+const MarkdownView = lazy(() => import("@/components/MarkdownView").then((m) => ({ default: m.MarkdownView })))
 
 export function GameDetail() {
   const { id = "" } = useParams()
@@ -76,8 +78,10 @@ export function GameDetail() {
           <TabsTrigger value="rules">规则</TabsTrigger>
           <TabsTrigger value="clock">计时</TabsTrigger>
         </TabsList>
-        <TabsContent value="rules" className="mt-4 whitespace-pre-wrap text-sm leading-6">
-          {game.rulesMarkdown}
+        <TabsContent value="rules" className="mt-4">
+          <Suspense fallback={<div className="h-40 animate-pulse rounded-xl bg-muted" />}>
+            <MarkdownView source={game.rulesMarkdown} />
+          </Suspense>
         </TabsContent>
         <TabsContent value="clock" className="mt-4 space-y-2 text-sm">
           <p>默认每步 {seconds} 秒，宽限 {game.defaultTime.graceMs / 1000} 秒。</p>

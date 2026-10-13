@@ -7,8 +7,8 @@
 use crate::canon::canon;
 use crate::crypto::sha256_hex;
 use crate::game::{
-    ArenaRng, Config, Game, GameError, GameResult, Manifest, Seat, TimeoutDecision, TimeoutPolicy, TimeControl, Trait,
-    Variant, Viewer,
+    ArenaRng, Config, Game, GameError, GameResult, Manifest, Seat, TimeControl, TimeoutDecision,
+    TimeoutPolicy, Trait, Variant, Viewer,
 };
 use rquickjs::context::intrinsic::{Eval, Json};
 use rquickjs::{CaughtError, Context, Ctx, Function, Runtime};
@@ -189,33 +189,67 @@ pub fn validate(source: &str) -> Result<Report, GameError> {
         Err(err) => return Ok(fail_report("manifest", err.0, Some(raw))),
     };
     let mut checks = vec![
-        Check { id: "interface".into(), ok: true, detail: "八个规则方法都在".into() },
-        Check { id: "manifest".into(), ok: true, detail: format!("{} · {} 人", parsed.manifest.name, parsed.manifest.max_players) },
+        Check {
+            id: "interface".into(),
+            ok: true,
+            detail: "八个规则方法都在".into(),
+        },
+        Check {
+            id: "manifest".into(),
+            ok: true,
+            detail: format!(
+                "{} · {} 人",
+                parsed.manifest.name, parsed.manifest.max_players
+            ),
+        },
     ];
-    let game = JsGame { source: source.to_string(), manifest: parsed.manifest.clone() };
+    let game = JsGame {
+        source: source.to_string(),
+        manifest: parsed.manifest.clone(),
+    };
     match self_play(&game) {
         Ok((left, right, terminal)) => {
             let same = left == right;
             checks.push(Check {
                 id: "determinism".into(),
                 ok: same,
-                detail: if same { "同一粒种子自对两次，局面一致".into() } else { "同一粒种子得到了不同局面".into() },
+                detail: if same {
+                    "同一粒种子自对两次，局面一致".into()
+                } else {
+                    "同一粒种子得到了不同局面".into()
+                },
             });
             checks.push(Check {
                 id: "self-play".into(),
                 ok: true,
-                detail: if terminal { "随机对随机走到了终局".into() } else { "自对下了 48 步仍未终局，先记为通过".into() },
+                detail: if terminal {
+                    "随机对随机走到了终局".into()
+                } else {
+                    "自对下了 48 步仍未终局，先记为通过".into()
+                },
             });
         }
         Err(err) if hostile(&err.0) => return Err(err),
-        Err(err) => checks.push(Check { id: "self-play".into(), ok: false, detail: err.0 }),
+        Err(err) => checks.push(Check {
+            id: "self-play".into(),
+            ok: false,
+            detail: err.0,
+        }),
     }
     match timeout_ok(&game) {
-        Ok(detail) => checks.push(Check { id: "timeout".into(), ok: true, detail }),
+        Ok(detail) => checks.push(Check {
+            id: "timeout".into(),
+            ok: true,
+            detail,
+        }),
         Err(err) if hostile(&err.0) => return Err(err),
-        Err(err) => checks.push(Check { id: "timeout".into(), ok: false, detail: err.0 }),
+        Err(err) => checks.push(Check {
+            id: "timeout".into(),
+            ok: false,
+            detail: err.0,
+        }),
     }
-    if parsed.manifest.traits.iter().any(|t| *t == Trait::HiddenInfo) {
+    if parsed.manifest.traits.contains(&Trait::HiddenInfo) {
         checks.push(Check {
             id: "hidden".into(),
             ok: true,
@@ -223,13 +257,21 @@ pub fn validate(source: &str) -> Result<Report, GameError> {
         });
     }
     let ok = checks.iter().all(|c| c.ok);
-    Ok(Report { ok, checks, manifest: Some(parsed.public) })
+    Ok(Report {
+        ok,
+        checks,
+        manifest: Some(parsed.public),
+    })
 }
 
 fn fail_report(id: &str, detail: String, manifest: Option<Value>) -> Report {
     Report {
         ok: false,
-        checks: vec![Check { id: id.into(), ok: false, detail }],
+        checks: vec![Check {
+            id: id.into(),
+            ok: false,
+            detail,
+        }],
         manifest,
     }
 }
@@ -264,23 +306,32 @@ fn parse_manifest(raw: &Value) -> Result<Parsed, GameError> {
     fn default_schema() -> Value {
         json!({"type": "object"})
     }
-    let incoming: Incoming = serde_json::from_value(raw.clone()).map_err(|err| GameError(format!("manifest 对不上：{err}")))?;
+    let incoming: Incoming = serde_json::from_value(raw.clone())
+        .map_err(|err| GameError(format!("manifest 对不上：{err}")))?;
     if incoming.name.trim().is_empty() || incoming.name.chars().count() > 40 {
         return Err(GameError("名称需要 1–40 个字".into()));
     }
-    if !(1..=8).contains(&incoming.min_players) || incoming.max_players < incoming.min_players || incoming.max_players > 8 {
+    if !(1..=8).contains(&incoming.min_players)
+        || incoming.max_players < incoming.min_players
+        || incoming.max_players > 8
+    {
         return Err(GameError("人数需在 1–8，且最少不超过最多".into()));
     }
     if incoming.variants.is_empty() {
         return Err(GameError("至少要有一个变体".into()));
     }
     if !["grid-board", "card-table", "json-inspector"].contains(&incoming.renderer.as_str()) {
-        return Err(GameError("renderer 只能是 grid-board、card-table 或 json-inspector".into()));
+        return Err(GameError(
+            "renderer 只能是 grid-board、card-table 或 json-inspector".into(),
+        ));
     }
     if incoming.rules_markdown.trim().is_empty() {
         return Err(GameError("规则说明不能为空".into()));
     }
-    if !incoming.allowed_timeout_policies.contains(&incoming.timeout_policy) {
+    if !incoming
+        .allowed_timeout_policies
+        .contains(&incoming.timeout_policy)
+    {
         return Err(GameError("默认超时策略不在允许列表里".into()));
     }
     let manifest = Manifest {
@@ -309,7 +360,13 @@ fn parse_manifest(raw: &Value) -> Result<Parsed, GameError> {
     Ok(Parsed { manifest, public })
 }
 
-pub fn publish_manifest(public: Value, id: &str, version: &str, name: Option<&str>, description: Option<&str>) -> Result<(Manifest, Value), GameError> {
+pub fn publish_manifest(
+    public: Value,
+    id: &str,
+    version: &str,
+    name: Option<&str>,
+    description: Option<&str>,
+) -> Result<(Manifest, Value), GameError> {
     let mut value = public;
     value["id"] = json!(id);
     value["version"] = json!(version);
@@ -325,7 +382,8 @@ pub fn publish_manifest(public: Value, id: &str, version: &str, name: Option<&st
     if let Some(description) = description.map(str::trim).filter(|s| !s.is_empty()) {
         value["description"] = json!(description.chars().take(200).collect::<String>());
     }
-    let manifest: Manifest = serde_json::from_value(value.clone()).map_err(|err| GameError(format!("manifest 对不上：{err}")))?;
+    let manifest: Manifest = serde_json::from_value(value.clone())
+        .map_err(|err| GameError(format!("manifest 对不上：{err}")))?;
     Ok((manifest, value))
 }
 
@@ -340,7 +398,12 @@ fn play_once(game: &JsGame, seed: &[u8; 32]) -> Result<(Value, bool), GameError>
     let mut rng = crate::game::SeededRng::from_seed_seq(seed, 0);
     let cfg = Config {
         players: game.manifest.max_players,
-        variant: game.manifest.variants.first().map(|v| v.id.clone()).unwrap_or_else(|| "standard".into()),
+        variant: game
+            .manifest
+            .variants
+            .first()
+            .map(|v| v.id.clone())
+            .unwrap_or_else(|| "standard".into()),
         options: json!({}),
     };
     let (mut state, _) = game.setup(&cfg, &mut rng)?;
@@ -350,7 +413,9 @@ fn play_once(game: &JsGame, seed: &[u8; 32]) -> Result<(Value, bool), GameError>
             break;
         }
         let seats = game.to_act(&state);
-        let Some(seat) = seats.first().copied() else { break };
+        let Some(seat) = seats.first().copied() else {
+            break;
+        };
         let actions = game.legal_actions(&state, seat)?;
         let action = actions
             .iter()
@@ -369,7 +434,12 @@ fn timeout_ok(game: &JsGame) -> Result<String, GameError> {
     let mut rng = crate::game::SeededRng::from_seed_seq(&[9u8; 32], 1);
     let cfg = Config {
         players: game.manifest.max_players,
-        variant: game.manifest.variants.first().map(|v| v.id.clone()).unwrap_or_else(|| "standard".into()),
+        variant: game
+            .manifest
+            .variants
+            .first()
+            .map(|v| v.id.clone())
+            .unwrap_or_else(|| "standard".into()),
         options: json!({}),
     };
     let (state, _) = game.setup(&cfg, &mut rng)?;
@@ -380,7 +450,10 @@ fn timeout_ok(game: &JsGame) -> Result<String, GameError> {
     };
     let kind = action.get("type").and_then(|t| t.as_str()).unwrap_or("");
     let legal = game.legal_actions(&state, seat)?;
-    if !legal.iter().any(|a| a.get("type").and_then(|t| t.as_str()) == Some(kind)) {
+    if !legal
+        .iter()
+        .any(|a| a.get("type").and_then(|t| t.as_str()) == Some(kind))
+    {
         return Err(GameError(format!("超时动作 {kind} 不在合法列表里")));
     }
     Ok(format!("超时会走 {kind}"))
@@ -429,15 +502,25 @@ fn has_call(source: &str, name: &str) -> bool {
 }
 
 fn has_word(source: &str, word: &str) -> bool {
-    source.match_indices(word).any(|(i, _)| word_before(source, i) && word_after(source, i + word.len()))
+    source
+        .match_indices(word)
+        .any(|(i, _)| word_before(source, i) && word_after(source, i + word.len()))
 }
 
 fn word_before(source: &str, index: usize) -> bool {
-    source[..index].chars().next_back().map(|c| !is_ident(c)).unwrap_or(true)
+    source[..index]
+        .chars()
+        .next_back()
+        .map(|c| !is_ident(c))
+        .unwrap_or(true)
 }
 
 fn word_after(source: &str, index: usize) -> bool {
-    source[index..].chars().next().map(|c| !is_ident(c)).unwrap_or(true)
+    source[index..]
+        .chars()
+        .next()
+        .map(|c| !is_ident(c))
+        .unwrap_or(true)
 }
 
 fn is_ident(c: char) -> bool {
@@ -449,7 +532,11 @@ fn inspect(source: &str) -> Result<Value, GameError> {
     serde_json::from_str(&text).map_err(|err| GameError(format!("inspect 不是 JSON：{err}")))
 }
 
-fn execute(source: &str, call: Option<(&str, Value)>, rng: Option<&mut dyn ArenaRng>) -> Result<String, GameError> {
+fn execute(
+    source: &str,
+    call: Option<(&str, Value)>,
+    rng: Option<&mut dyn ArenaRng>,
+) -> Result<String, GameError> {
     if let Some(rng) = rng {
         park_rng(rng);
     } else {
@@ -471,11 +558,19 @@ fn execute(source: &str, call: Option<(&str, Value)>, rng: Option<&mut dyn Arena
         eval_source(&ctx, PRELUDE)?;
         eval_source(&ctx, source)?;
         if let Some((method, args)) = call {
-            let func: Function = ctx.globals().get("__arenaCall").map_err(|err| explain(&ctx, err))?;
-            let args_json = serde_json::to_string(&args).map_err(|err| GameError(err.to_string()))?;
-            func.call((method, args_json)).map_err(|err| explain(&ctx, err))
+            let func: Function = ctx
+                .globals()
+                .get("__arenaCall")
+                .map_err(|err| explain(&ctx, err))?;
+            let args_json =
+                serde_json::to_string(&args).map_err(|err| GameError(err.to_string()))?;
+            func.call((method, args_json))
+                .map_err(|err| explain(&ctx, err))
         } else {
-            let func: Function = ctx.globals().get("__arenaInspect").map_err(|err| explain(&ctx, err))?;
+            let func: Function = ctx
+                .globals()
+                .get("__arenaInspect")
+                .map_err(|err| explain(&ctx, err))?;
             func.call(()).map_err(|err| explain(&ctx, err))
         }
     })
@@ -485,22 +580,35 @@ fn bind_hosts(ctx: &Ctx<'_>) -> Result<(), GameError> {
     let uint32 = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<f64> {
         match rng_u32() {
             Some(n) => Ok(n as f64),
-            None => Err(throw_msg(&ctx, "RNG 只在 setup、apply、timeoutAction 里可用")),
+            None => Err(throw_msg(
+                &ctx,
+                "RNG 只在 setup、apply、timeoutAction 里可用",
+            )),
         }
     })
     .map_err(|err| GameError(err.to_string()))?;
-    ctx.globals().set("hostUint32", uint32).map_err(|err| GameError(err.to_string()))?;
-    let int_n = Function::new(ctx.clone(), |ctx: Ctx<'_>, n: f64| -> rquickjs::Result<i32> {
-        if !n.is_finite() || n < 1.0 {
-            return Err(throw_msg(&ctx, "rng.int 需要正整数"));
-        }
-        match rng_int(n as usize) {
-            Some(v) => Ok(v as i32),
-            None => Err(throw_msg(&ctx, "RNG 只在 setup、apply、timeoutAction 里可用")),
-        }
-    })
+    ctx.globals()
+        .set("hostUint32", uint32)
+        .map_err(|err| GameError(err.to_string()))?;
+    let int_n = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, n: f64| -> rquickjs::Result<i32> {
+            if !n.is_finite() || n < 1.0 {
+                return Err(throw_msg(&ctx, "rng.int 需要正整数"));
+            }
+            match rng_int(n as usize) {
+                Some(v) => Ok(v as i32),
+                None => Err(throw_msg(
+                    &ctx,
+                    "RNG 只在 setup、apply、timeoutAction 里可用",
+                )),
+            }
+        },
+    )
     .map_err(|err| GameError(err.to_string()))?;
-    ctx.globals().set("hostInt", int_n).map_err(|err| GameError(err.to_string()))?;
+    ctx.globals()
+        .set("hostInt", int_n)
+        .map_err(|err| GameError(err.to_string()))?;
     Ok(())
 }
 
@@ -544,14 +652,26 @@ fn friendly(msg: &str) -> String {
     msg.to_string()
 }
 
-fn call_value(game: &JsGame, method: &str, args: Value, rng: Option<&mut dyn ArenaRng>) -> Result<Value, GameError> {
+fn call_value(
+    game: &JsGame,
+    method: &str,
+    args: Value,
+    rng: Option<&mut dyn ArenaRng>,
+) -> Result<Value, GameError> {
     let text = execute(&game.source, Some((method, args)), rng)?;
     serde_json::from_str(&text).map_err(|err| GameError(format!("{method} 返回的不是 JSON：{err}")))
 }
 
 fn take_state(value: Value) -> Result<(Value, Vec<Value>), GameError> {
-    let state = value.get("state").cloned().ok_or_else(|| GameError("需要返回 { state }".into()))?;
-    let events = value.get("events").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let state = value
+        .get("state")
+        .cloned()
+        .ok_or_else(|| GameError("需要返回 { state }".into()))?;
+    let events = value
+        .get("events")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     Ok((state, events))
 }
 
@@ -560,7 +680,11 @@ impl Game for JsGame {
         self.manifest.clone()
     }
 
-    fn setup(&self, cfg: &Config, rng: &mut dyn ArenaRng) -> Result<(Value, Vec<Value>), GameError> {
+    fn setup(
+        &self,
+        cfg: &Config,
+        rng: &mut dyn ArenaRng,
+    ) -> Result<(Value, Vec<Value>), GameError> {
         let value = call_value(
             self,
             "setup",
@@ -592,10 +716,19 @@ impl Game for JsGame {
 
     fn legal_actions(&self, state: &Value, seat: Seat) -> Result<Vec<Value>, GameError> {
         let value = call_value(self, "legalActions", json!([state, seat]), None)?;
-        value.as_array().cloned().ok_or_else(|| GameError("legalActions 需要返回数组".into()))
+        value
+            .as_array()
+            .cloned()
+            .ok_or_else(|| GameError("legalActions 需要返回数组".into()))
     }
 
-    fn apply(&self, state: &Value, seat: Seat, action: &Value, rng: &mut dyn ArenaRng) -> Result<(Value, Vec<Value>), GameError> {
+    fn apply(
+        &self,
+        state: &Value,
+        seat: Seat,
+        action: &Value,
+        rng: &mut dyn ArenaRng,
+    ) -> Result<(Value, Vec<Value>), GameError> {
         let value = call_value(self, "apply", json!([state, seat, action]), Some(rng))?;
         take_state(value)
     }
@@ -620,7 +753,10 @@ impl Game for JsGame {
         rng: &mut dyn ArenaRng,
     ) -> Result<TimeoutDecision, GameError> {
         if policy == TimeoutPolicy::Forfeit {
-            return Ok(TimeoutDecision { policy, action: Some(json!({"type": "resign"})) });
+            return Ok(TimeoutDecision {
+                policy,
+                action: Some(json!({"type": "resign"})),
+            });
         }
         let value = call_value(self, "timeoutAction", json!([state, seat]), Some(rng))?;
         let action = value.get("action").cloned().filter(|v| !v.is_null());
@@ -629,7 +765,10 @@ impl Game for JsGame {
             .and_then(|v| v.as_str())
             .and_then(TimeoutPolicy::parse)
             .unwrap_or(policy);
-        Ok(TimeoutDecision { policy: chosen, action })
+        Ok(TimeoutDecision {
+            policy: chosen,
+            action,
+        })
     }
 }
 
@@ -655,10 +794,15 @@ mod tests {
         if !report.ok {
             return Err(GameError(format!("{:?}", report.checks)));
         }
-        let (manifest, _) = publish_manifest(report.manifest.unwrap(), "u_probe", "1.0.0", None, None)?;
+        let (manifest, _) =
+            publish_manifest(report.manifest.unwrap(), "u_probe", "1.0.0", None, None)?;
         let game = JsGame::from_stored(source.to_string(), manifest);
         let mut rng = SeededRng::from_seed_seq(&[1u8; 32], 0);
-        let cfg = Config { players: 2, variant: game.manifest.variants[0].id.clone(), options: json!({}) };
+        let cfg = Config {
+            players: 2,
+            variant: game.manifest.variants[0].id.clone(),
+            options: json!({}),
+        };
         Ok(game.setup(&cfg, &mut rng)?.0)
     }
 
@@ -666,7 +810,11 @@ mod tests {
     fn tic_tac_toe_scripted_line() {
         let game = example();
         let mut rng = SeededRng::from_seed_seq(&[3u8; 32], 0);
-        let cfg = Config { players: 2, variant: "3".into(), options: json!({}) };
+        let cfg = Config {
+            players: 2,
+            variant: "3".into(),
+            options: json!({}),
+        };
         let (mut state, _) = game.setup(&cfg, &mut rng).unwrap();
         for (seat, at) in [(0, "a3"), (1, "a2"), (0, "b3"), (1, "b2"), (0, "c3")] {
             let action = json!({"type": "place", "data": {"at": at}});
@@ -677,7 +825,15 @@ mod tests {
         let result = game.result(&state).unwrap();
         assert_eq!(result.scores, vec![1.0, -1.0]);
         assert_eq!(result.reason, "line");
-        let view = game.view(&state, &Viewer { seat: Some(1), omniscient: false }).unwrap();
+        let view = game
+            .view(
+                &state,
+                &Viewer {
+                    seat: Some(1),
+                    omniscient: false,
+                },
+            )
+            .unwrap();
         assert_eq!(view["renderer"], "grid-board");
         assert_eq!(view["winner"], 0);
     }
@@ -788,6 +944,10 @@ mod tests {
           });
         "#;
         let err = setup_of(source).unwrap_err();
-        assert!(err.0.contains("Function") || err.0.contains("disabled") || !err.0.is_empty(), "{}", err.0);
+        assert!(
+            err.0.contains("Function") || err.0.contains("disabled") || !err.0.is_empty(),
+            "{}",
+            err.0
+        );
     }
 }

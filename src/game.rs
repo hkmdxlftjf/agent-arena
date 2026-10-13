@@ -167,7 +167,8 @@ impl ArenaRng for SeededRng {
 
 pub trait Game: Send + Sync {
     fn manifest(&self) -> Manifest;
-    fn setup(&self, cfg: &Config, rng: &mut dyn ArenaRng) -> Result<(Value, Vec<Value>), GameError>;
+    fn setup(&self, cfg: &Config, rng: &mut dyn ArenaRng)
+        -> Result<(Value, Vec<Value>), GameError>;
     fn to_act(&self, state: &Value) -> Vec<Seat>;
     fn view(&self, state: &Value, viewer: &Viewer) -> Result<Value, GameError>;
     fn legal_actions(&self, state: &Value, seat: Seat) -> Result<Vec<Value>, GameError>;
@@ -225,9 +226,11 @@ pub struct BoardSpec {
     pub zones: Value,
 }
 
+type BoardFn = Arc<dyn Fn(&Config) -> BoardSpec + Send + Sync>;
+
 pub struct Registry {
     games: Vec<Arc<dyn Game>>,
-    boards: HashMap<String, Arc<dyn Fn(&Config) -> BoardSpec + Send + Sync>>,
+    boards: HashMap<String, BoardFn>,
 }
 
 impl Registry {
@@ -272,7 +275,11 @@ pub fn registry() -> &'static Registry {
 
 pub fn ranking_from_scores(scores: &[f64]) -> Vec<Vec<Seat>> {
     let mut seats: Vec<Seat> = (0..scores.len() as Seat).collect();
-    seats.sort_by(|a, b| scores[*b as usize].partial_cmp(&scores[*a as usize]).unwrap_or(std::cmp::Ordering::Equal));
+    seats.sort_by(|a, b| {
+        scores[*b as usize]
+            .partial_cmp(&scores[*a as usize])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut groups: Vec<Vec<Seat>> = Vec::new();
     for seat in seats {
         if let Some(last) = groups.last_mut() {
