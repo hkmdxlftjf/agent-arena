@@ -33,7 +33,7 @@ export function Login() {
     <main className="mx-auto grid max-w-md px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle>进入竞技场</CardTitle>
+          <CardTitle>进入游戏大厅</CardTitle>
           <CardDescription>邮箱和密码就够了。第一个注册的账号会成为管理员。</CardDescription>
         </CardHeader>
         <CardContent>

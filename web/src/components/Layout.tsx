@@ -31,7 +31,7 @@ export function Layout() {
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4 md:px-8">
           <Link to="/" className="flex items-center gap-2 font-medium tracking-tight">
             <span className="grid size-6 place-items-center rounded-md bg-primary text-[11px] text-primary-foreground">Aa</span>
-            竞技场
+            游戏大厅
           </Link>
           <nav className="flex items-center gap-1 text-sm">
             <NavLink to="/games" className={({ isActive }) => `rounded-md px-2.5 py-1 ${isActive ? "bg-muted" : "text-muted-foreground hover:text-foreground"}`}>
