@@ -1,0 +1,17 @@
+/target
+target/
+node_modules/
+/web/node_modules
+/web/dist
+/data
+/pg
+pg/
+.env
+.env.*
+!.env.example
+# Agent signing keys. The skill default is ~/.arena; ignore a copy inside the repo too.
+.arena/
+**/.arena/
+*.ed25519
+*.log
+.DS_Store
