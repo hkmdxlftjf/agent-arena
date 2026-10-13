@@ -12,9 +12,9 @@ use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use rust_embed::Embed;
 use serde::Deserialize;
-use tower_http::trace::TraceLayer;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
+use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 #[derive(Embed)]
@@ -25,15 +25,29 @@ pub fn router(app: App) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .route("/mcp", post(crate::mcp::mcp_post).get(crate::mcp::mcp_get).delete(crate::mcp::mcp_delete))
+        .route(
+            "/mcp",
+            post(crate::mcp::mcp_post)
+                .get(crate::mcp::mcp_get)
+                .delete(crate::mcp::mcp_delete),
+        )
         .route("/ws/match/:id", get(ws_match))
         .route("/api/auth/register", post(register))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
+        .route("/api/auth/password", post(set_password))
+        .route("/api/auth/github/unlink", post(github_unlink))
+        .route("/auth/github", get(github_start))
+        .route("/auth/github/callback", get(github_callback))
+        .route("/connect.sh", get(connect_sh))
+        .route("/connect.ps1", get(connect_ps1))
         .route("/api/me", get(me))
         .route("/api/agents", get(list_agents).post(create_agent))
         .route("/api/agents/:id/tokens", post(issue_token))
-        .route("/api/agents/:id/tokens/:tid", axum::routing::delete(revoke_token))
+        .route(
+            "/api/agents/:id/tokens/:tid",
+            axum::routing::delete(revoke_token),
+        )
         .route("/api/games", get(games))
         .route("/api/games/:id", get(game))
         .route("/api/games/:id/unpublish", post(unpublish_game))
@@ -62,7 +76,10 @@ async fn healthz() -> &'static str {
 }
 
 async fn readyz(State(app): State<App>) -> Result<&'static str, CallError> {
-    sqlx::query("SELECT 1").execute(app.pool()).await.map_err(|_| CallError::new(503, "not_ready", "数据库未就绪"))?;
+    sqlx::query("SELECT 1")
+        .execute(app.pool())
+        .await
+        .map_err(|_| CallError::new(503, "not_ready", "数据库未就绪"))?;
     Ok("ok")
 }
 
@@ -79,7 +96,9 @@ async fn register(
     jar: CookieJar,
     Json(body): Json<RegisterBody>,
 ) -> Result<impl IntoResponse, CallError> {
-    let (user, sid) = app.register(&body.email, &body.password, &body.handle).await?;
+    let (user, sid) = app
+        .register(&body.email, &body.password, &body.handle)
+        .await?;
     let jar = jar.add(session_cookie(&sid, secure(&headers, &app)));
     Ok((jar, Json(json!({"user": user_json(&user)}))))
 }
@@ -132,7 +151,13 @@ async fn create_agent(
 ) -> Result<Json<Value>, CallError> {
     let user = require_user(&app, &jar).await?;
     let created = app
-        .create_agent(&user, &body.name, body.description.as_deref(), body.model_label.as_deref(), body.allow_comments)
+        .create_agent(
+            &user,
+            &body.name,
+            body.description.as_deref(),
+            body.model_label.as_deref(),
+            body.allow_comments,
+        )
         .await?;
     Ok(Json(created))
 }
@@ -177,32 +202,57 @@ struct SourceBody {
     description: Option<String>,
 }
 
-async fn check_rules(State(app): State<App>, jar: CookieJar, Json(body): Json<SourceBody>) -> Result<Json<Value>, CallError> {
+async fn check_rules(
+    State(app): State<App>,
+    jar: CookieJar,
+    Json(body): Json<SourceBody>,
+) -> Result<Json<Value>, CallError> {
     let user = require_user(&app, &jar).await?;
     Ok(Json(app.check_rules(&user, &body.source).await?))
 }
 
-async fn publish_rules(State(app): State<App>, jar: CookieJar, Json(body): Json<SourceBody>) -> Result<Json<Value>, CallError> {
+async fn publish_rules(
+    State(app): State<App>,
+    jar: CookieJar,
+    Json(body): Json<SourceBody>,
+) -> Result<Json<Value>, CallError> {
     let user = require_user(&app, &jar).await?;
     let slug = body.slug.unwrap_or_default();
     Ok(Json(
-        app.publish_rules(&user, &body.source, &slug, body.name.as_deref(), body.description.as_deref())
-            .await?,
+        app.publish_rules(
+            &user,
+            &body.source,
+            &slug,
+            body.name.as_deref(),
+            body.description.as_deref(),
+        )
+        .await?,
     ))
 }
 
-async fn unpublish_game(State(app): State<App>, jar: CookieJar, Path(id): Path<String>) -> Result<Json<Value>, CallError> {
+async fn unpublish_game(
+    State(app): State<App>,
+    jar: CookieJar,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, CallError> {
     let user = require_user(&app, &jar).await?;
     Ok(Json(app.unpublish_game(&user, &id).await?))
 }
 
-async fn hide_game(State(app): State<App>, jar: CookieJar, Path(id): Path<String>) -> Result<Json<Value>, CallError> {
+async fn hide_game(
+    State(app): State<App>,
+    jar: CookieJar,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, CallError> {
     let user = require_user(&app, &jar).await?;
     Ok(Json(app.hide_game(&user, &id).await?))
 }
 
 async fn sdk_ts() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], include_str!("../sdk/game.ts"))
+    (
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        include_str!("../sdk/game.ts"),
+    )
 }
 
 async fn example_js() -> impl IntoResponse {
@@ -217,7 +267,10 @@ struct MatchQuery {
     live: Option<i32>,
 }
 
-async fn matches(State(app): State<App>, Query(q): Query<MatchQuery>) -> Result<Json<Value>, CallError> {
+async fn matches(
+    State(app): State<App>,
+    Query(q): Query<MatchQuery>,
+) -> Result<Json<Value>, CallError> {
     let _ = q.live;
     Ok(Json(json!(app.list_live().await?)))
 }
@@ -240,11 +293,14 @@ async fn keys_doc(State(app): State<App>) -> Json<Value> {
 }
 
 async fn skill_doc(State(app): State<App>) -> Json<Value> {
-    Json(app.skill_doc())
+    let mut doc = app.skill_doc();
+    let (_bytes, sha) = skill_bundle();
+    doc["sha256"] = json!(sha);
+    Json(doc)
 }
 
 async fn skill_zip() -> impl IntoResponse {
-    let bytes = skill_zip_bytes();
+    let (bytes, _sha) = skill_bundle();
     (
         [
             (header::CONTENT_TYPE, "application/zip"),
@@ -252,27 +308,37 @@ async fn skill_zip() -> impl IntoResponse {
                 header::CONTENT_DISPOSITION,
                 "attachment; filename=\"arena-skill-v1.0.0.zip\"",
             ),
+            (header::CACHE_CONTROL, "public, max-age=300"),
         ],
         bytes,
     )
 }
 
-fn skill_zip_bytes() -> Vec<u8> {
+fn skill_bundle() -> (Vec<u8>, String) {
     use std::io::Write;
     use std::sync::OnceLock;
-    static ZIP: OnceLock<Vec<u8>> = OnceLock::new();
+    static ZIP: OnceLock<(Vec<u8>, String)> = OnceLock::new();
     ZIP.get_or_init(|| {
         let mut cursor = std::io::Cursor::new(Vec::new());
         {
             let mut zip = zip::ZipWriter::new(&mut cursor);
-            let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            let modified =
+                zip::DateTime::from_date_and_time(2026, 1, 1, 0, 0, 0).expect("zip time");
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .last_modified_time(modified)
+                .unix_permissions(0o644);
             zip.start_file("arena/SKILL.md", opts).ok();
-            zip.write_all(include_str!("../skill/arena/SKILL.md").as_bytes()).ok();
+            zip.write_all(include_str!("../skill/arena/SKILL.md").as_bytes())
+                .ok();
             zip.start_file("arena/scripts/sign.mjs", opts).ok();
-            zip.write_all(include_str!("../skill/arena/scripts/sign.mjs").as_bytes()).ok();
+            zip.write_all(include_str!("../skill/arena/scripts/sign.mjs").as_bytes())
+                .ok();
             zip.finish().ok();
         }
-        cursor.into_inner()
+        let bytes = cursor.into_inner();
+        let sha = crate::crypto::sha256_hex(&bytes);
+        (bytes, sha)
     })
     .clone()
 }
@@ -282,19 +348,35 @@ struct BoardQuery {
     game: Option<String>,
 }
 
-async fn leaderboard(State(app): State<App>, Query(q): Query<BoardQuery>) -> Result<Json<Value>, CallError> {
-    Ok(Json(app.leaderboard(q.game.as_deref().unwrap_or("gomoku")).await?))
+async fn leaderboard(
+    State(app): State<App>,
+    Query(q): Query<BoardQuery>,
+) -> Result<Json<Value>, CallError> {
+    Ok(Json(
+        app.leaderboard(q.game.as_deref().unwrap_or("gomoku"))
+            .await?,
+    ))
 }
 
-async fn user_profile(State(app): State<App>, Path(handle): Path<String>) -> Result<Json<Value>, CallError> {
+async fn user_profile(
+    State(app): State<App>,
+    Path(handle): Path<String>,
+) -> Result<Json<Value>, CallError> {
     Ok(Json(app.user_profile(&handle).await?))
 }
 
-async fn agent_profile(State(app): State<App>, Path(id): Path<Uuid>) -> Result<Json<Value>, CallError> {
+async fn agent_profile(
+    State(app): State<App>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, CallError> {
     Ok(Json(app.agent_profile(id).await?))
 }
 
-async fn ws_leaderboard(State(app): State<App>, Path(game): Path<String>, ws: WebSocketUpgrade) -> Response {
+async fn ws_leaderboard(
+    State(app): State<App>,
+    Path(game): Path<String>,
+    ws: WebSocketUpgrade,
+) -> Response {
     ws.on_upgrade(move |socket| leaderboard_socket(app, game, socket))
 }
 
@@ -324,22 +406,35 @@ async fn leaderboard_socket(app: App, game: String, mut socket: WebSocket) {
     }
 }
 
-async fn ws_match(State(app): State<App>, Path(id): Path<Uuid>, ws: WebSocketUpgrade) -> Result<impl IntoResponse, CallError> {
+async fn ws_match(
+    State(app): State<App>,
+    Path(id): Path<Uuid>,
+    ws: WebSocketUpgrade,
+) -> Result<impl IntoResponse, CallError> {
     let _ = app.public_match(id).await?;
     let slot = app.slot(id);
     Ok(ws.on_upgrade(move |socket| handle_socket(app, id, slot, socket)))
 }
 
-async fn handle_socket(app: App, id: Uuid, slot: std::sync::Arc<crate::room::Slot>, mut socket: WebSocket) {
+async fn handle_socket(
+    app: App,
+    id: Uuid,
+    slot: std::sync::Arc<crate::room::Slot>,
+    mut socket: WebSocket,
+) {
     let n = slot.viewers.fetch_add(1, Ordering::Relaxed) + 1;
     let mut rx = slot.events.subscribe();
     if let Ok(snap) = app.public_match(id).await {
         let _ = socket
-            .send(Message::Text(json!({"type":"snapshot","data": snap}).to_string()))
+            .send(Message::Text(
+                json!({"type":"snapshot","data": snap}).to_string(),
+            ))
             .await;
     }
     let _ = socket
-        .send(Message::Text(json!({"type":"viewers","count": n}).to_string()))
+        .send(Message::Text(
+            json!({"type":"viewers","count": n}).to_string(),
+        ))
         .await;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(30));
     ping.tick().await;
@@ -373,29 +468,104 @@ async fn handle_socket(app: App, id: Uuid, slot: std::sync::Arc<crate::room::Slo
         }
     }
     let n = slot.viewers.fetch_sub(1, Ordering::Relaxed) - 1;
-    let _ = slot.events.send(json!({"type":"viewers","count": n}).to_string());
+    let _ = slot
+        .events
+        .send(json!({"type":"viewers","count": n}).to_string());
 }
 
-async fn spa(uri: Uri) -> Response {
+async fn spa(headers: HeaderMap, uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
-    if let Some(file) = Assets::get(path) {
-        return asset_response(path, file.data.as_ref());
+    if path.ends_with(".br") || path.ends_with(".gz") {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
     }
-    if !path.starts_with("api/") && !path.contains('.') {
-        if let Some(file) = Assets::get("index.html") {
-            return asset_response("index.html", file.data.as_ref());
+    if let Some(response) = asset_response(path, &headers) {
+        return response;
+    }
+    if !path.starts_with("api/") && !path.starts_with("auth/") && !path.contains('.') {
+        if let Some(response) = asset_response("index.html", &headers) {
+            return response;
         }
     }
     (StatusCode::NOT_FOUND, "not found").into_response()
 }
 
-fn asset_response(path: &str, data: &[u8]) -> Response {
+fn asset_response(path: &str, headers: &HeaderMap) -> Option<Response> {
+    let accept = headers
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let (body, encoding) = encoded_asset(path, accept)?;
     let mime = mime_guess::from_path(path).first_or_octet_stream();
-    Response::builder()
+    let cache = cache_control_for(path);
+    let mut builder = Response::builder()
         .header(header::CONTENT_TYPE, mime.as_ref())
-        .body(Body::from(data.to_vec()))
-        .unwrap()
+        .header(header::CACHE_CONTROL, cache)
+        .header(header::VARY, "Accept-Encoding");
+    if cache.starts_with("public, max-age=31536000") {
+        builder = builder
+            .header("CDN-Cache-Control", "public, max-age=31536000")
+            .header("Cloudflare-CDN-Cache-Control", "public, max-age=31536000");
+    }
+    if let Some(encoding) = encoding {
+        builder = builder.header(header::CONTENT_ENCODING, encoding);
+    }
+    Some(builder.body(Body::from(body)).unwrap())
+}
+
+pub(crate) fn cache_control_for(path: &str) -> &'static str {
+    if path == "index.html" || path.ends_with(".html") {
+        "no-cache"
+    } else if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "public, max-age=86400"
+    }
+}
+
+pub(crate) fn preferred_encodings(accept: &str) -> Vec<&'static str> {
+    let mut br = false;
+    let mut gzip = false;
+    for part in accept.split(',') {
+        let mut bits = part.split(';');
+        let name = bits.next().unwrap_or("").trim();
+        let mut allowed = true;
+        for param in bits {
+            let param = param.trim();
+            if let Some(q) = param.strip_prefix("q=") {
+                if q == "0" || q.starts_with("0.0") {
+                    allowed = false;
+                }
+            }
+        }
+        if !allowed {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("br") {
+            br = true;
+        } else if name.eq_ignore_ascii_case("gzip") {
+            gzip = true;
+        }
+    }
+    let mut out = Vec::new();
+    if br {
+        out.push("br");
+    }
+    if gzip {
+        out.push("gzip");
+    }
+    out
+}
+
+fn encoded_asset(path: &str, accept: &str) -> Option<(Vec<u8>, Option<&'static str>)> {
+    for enc in preferred_encodings(accept) {
+        let ext = if enc == "br" { "br" } else { "gz" };
+        if let Some(file) = Assets::get(&format!("{path}.{ext}")) {
+            return Some((file.data.to_vec(), Some(enc)));
+        }
+    }
+    let file = Assets::get(path)?;
+    Some((file.data.to_vec(), None))
 }
 
 async fn require_user(app: &App, jar: &CookieJar) -> Result<crate::app::User, CallError> {
@@ -413,7 +583,194 @@ fn user_json(user: &crate::app::User) -> Value {
         "handle": user.handle,
         "email": user.email,
         "role": user.role,
+        "github_login": user.github_login,
+        "has_password": user.has_password,
     })
+}
+
+#[derive(Deserialize)]
+struct OAuthStartQuery {
+    intent: Option<String>,
+}
+
+async fn github_start(
+    State(app): State<App>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Query(q): Query<OAuthStartQuery>,
+) -> Response {
+    if !app.config().github_ready() {
+        return redirect(jar, "/login?error=github_unconfigured");
+    }
+    let intent = q.intent.unwrap_or_else(|| "login".into());
+    let (purpose, user_id) = if intent == "link" {
+        match require_user(&app, &jar).await {
+            Ok(user) => ("link", Some(user.id)),
+            Err(_) => return redirect(jar, "/login?error=github_login_required"),
+        }
+    } else {
+        ("login", None)
+    };
+    let state = match app.begin_oauth(purpose, user_id).await {
+        Ok(state) => state,
+        Err(_) => return redirect(jar, "/login?error=github_upstream"),
+    };
+    let url = crate::github::authorize_url(app.config(), &state);
+    let jar = jar.add(oauth_state_cookie(&state, secure(&headers, &app)));
+    redirect(jar, &url)
+}
+
+#[derive(Deserialize)]
+struct OAuthCallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+}
+
+async fn github_callback(
+    State(app): State<App>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Query(q): Query<OAuthCallbackQuery>,
+) -> Response {
+    let state = q.state.unwrap_or_default();
+    let cookie = jar
+        .get("arena_oauth_state")
+        .map(|c| c.value().to_string())
+        .unwrap_or_default();
+    let jar = clear_oauth_cookie(jar);
+    if state.is_empty() || cookie != state {
+        return redirect(jar, "/login?error=github_state");
+    }
+    let pending = match app.take_oauth_state(&state).await {
+        Ok(Some(pending)) => pending,
+        _ => return redirect(jar, "/login?error=github_state"),
+    };
+    let fail = |jar: CookieJar, code: &str| -> Response {
+        let loc = if pending.purpose == "link" {
+            format!("/agents?error={code}")
+        } else {
+            format!("/login?error={code}")
+        };
+        redirect(jar, &loc)
+    };
+    if q.error.is_some() {
+        return fail(jar, "github_denied");
+    }
+    let Some(code) = q.code.filter(|s| !s.is_empty()) else {
+        return fail(jar, "github_denied");
+    };
+    let gh = match crate::github::exchange(app.config(), &code).await {
+        Ok(gh) => gh,
+        Err(err) => {
+            let code = if err.code == "github_email" {
+                "github_email"
+            } else {
+                "github_upstream"
+            };
+            return fail(jar, code);
+        }
+    };
+    if pending.purpose == "link" {
+        let Some(user_id) = pending.user_id else {
+            return redirect(jar, "/login?error=github_state");
+        };
+        if let Err(err) = app.link_github(user_id, &gh).await {
+            let code = if err.code == "github_taken" || err.code == "conflict" {
+                "github_taken"
+            } else {
+                "github_upstream"
+            };
+            return redirect(jar, &format!("/agents?error={code}"));
+        }
+        let sid = match app.create_session(user_id).await {
+            Ok(sid) => sid,
+            Err(_) => return redirect(jar, "/agents?error=github_upstream"),
+        };
+        let jar = jar.add(session_cookie(&sid, secure(&headers, &app)));
+        return redirect(jar, "/agents?github=linked");
+    }
+    match app.login_with_github(&gh).await {
+        Ok((_, sid)) => {
+            let jar = jar.add(session_cookie(&sid, secure(&headers, &app)));
+            redirect(jar, "/agents")
+        }
+        Err(err) => {
+            let code = match err.code {
+                "github_email" => "github_email",
+                "github_taken" | "conflict" => "github_taken",
+                _ => "github_upstream",
+            };
+            redirect(jar, &format!("/login?error={code}"))
+        }
+    }
+}
+
+async fn github_unlink(State(app): State<App>, jar: CookieJar) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    let user = app.unlink_github(&user).await?;
+    Ok(Json(json!({"user": user_json(&user)})))
+}
+
+#[derive(Deserialize)]
+struct PasswordBody {
+    password: String,
+    current_password: Option<String>,
+}
+
+async fn set_password(
+    State(app): State<App>,
+    jar: CookieJar,
+    Json(body): Json<PasswordBody>,
+) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    let user = app
+        .set_password(&user, &body.password, body.current_password.as_deref())
+        .await?;
+    Ok(Json(json!({"user": user_json(&user)})))
+}
+
+async fn connect_sh(State(app): State<App>) -> impl IntoResponse {
+    script_response(
+        include_str!("../scripts/connect.sh"),
+        &app.config().public_base_url,
+    )
+}
+
+async fn connect_ps1(State(app): State<App>) -> impl IntoResponse {
+    script_response(
+        include_str!("../scripts/connect.ps1"),
+        &app.config().public_base_url,
+    )
+}
+
+fn script_response(source: &str, base: &str) -> Response {
+    let body = source.replace("https://agent.idou.bid", base.trim_end_matches('/'));
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+fn redirect(jar: CookieJar, loc: &str) -> Response {
+    (jar, (StatusCode::FOUND, [(header::LOCATION, loc)])).into_response()
+}
+
+fn oauth_state_cookie(state: &str, secure: bool) -> Cookie<'static> {
+    Cookie::build(("arena_oauth_state", state.to_string()))
+        .path("/")
+        .http_only(true)
+        .same_site(cookie::SameSite::Lax)
+        .max_age(cookie::time::Duration::minutes(10))
+        .secure(secure)
+        .build()
+}
+
+fn clear_oauth_cookie(jar: CookieJar) -> CookieJar {
+    let mut dead = Cookie::from("arena_oauth_state");
+    dead.set_path("/");
+    jar.remove(dead)
 }
 
 fn session_cookie(sid: &str, secure: bool) -> Cookie<'static> {
@@ -427,11 +784,41 @@ fn session_cookie(sid: &str, secure: bool) -> Cookie<'static> {
 }
 
 fn secure(headers: &HeaderMap, app: &App) -> bool {
-    if let Some(v) = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) {
+    if let Some(v) = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+    {
         return v.split(',').next().unwrap_or("").trim() == "https";
     }
     if let Some(v) = headers.get("cf-visitor").and_then(|v| v.to_str().ok()) {
         return v.contains("https");
     }
     app.config().cookie_secure
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::{cache_control_for, preferred_encodings};
+
+    #[test]
+    fn hashed_assets_are_immutable_and_html_is_not() {
+        assert_eq!(
+            cache_control_for("assets/index-abc123.js"),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(
+            cache_control_for("assets/index-abc123.css"),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(cache_control_for("index.html"), "no-cache");
+        assert_eq!(cache_control_for("favicon.svg"), "public, max-age=86400");
+    }
+
+    #[test]
+    fn brotli_wins_when_the_client_accepts_it() {
+        assert_eq!(preferred_encodings("gzip, deflate, br"), vec!["br", "gzip"]);
+        assert_eq!(preferred_encodings("gzip"), vec!["gzip"]);
+        assert_eq!(preferred_encodings("br;q=0, gzip"), vec!["gzip"]);
+        assert!(preferred_encodings("identity").is_empty());
+    }
 }

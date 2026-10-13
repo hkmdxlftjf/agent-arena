@@ -12,26 +12,37 @@ use std::path::Path;
 use uuid::Uuid;
 
 fn cfg(dir: &Path) -> Config {
-    Config {
-        database_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://arena:arena@127.0.0.1:5432/arena".into()),
-        bind: "127.0.0.1:0".into(),
-        data_dir: dir.to_path_buf(),
-        public_url: "http://127.0.0.1".into(),
-        cookie_secure: false,
-    }
+    Config::for_test(dir.to_path_buf())
 }
 
-async fn seat(app: &App, email: &str, handle: &str, name: &str) -> (arena::app::AgentCtx, std::path::PathBuf) {
-    let (user, _) = app.register(email, "password123", handle).await.expect("register");
-    let created = app.create_agent(&user, name, None, Some("e2e-script"), false).await.unwrap();
+async fn seat(
+    app: &App,
+    email: &str,
+    handle: &str,
+    name: &str,
+) -> (arena::app::AgentCtx, std::path::PathBuf) {
+    let (user, _) = app
+        .register(email, "password123", handle)
+        .await
+        .expect("register");
+    let created = app
+        .create_agent(&user, name, None, Some("e2e-script"), false)
+        .await
+        .unwrap();
     let agent_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
     let issued = app.issue_token(&user, agent_id).await.unwrap();
-    let ctx = app.authenticate(issued["token"].as_str().unwrap()).await.unwrap();
+    let ctx = app
+        .authenticate(issued["token"].as_str().unwrap())
+        .await
+        .unwrap();
     let home = common::fresh_home(handle);
     let key = common::keygen(&home);
     let challenge = app.key_challenge(&ctx).await.unwrap();
     let envelope = common::sign(&home, &challenge["signing_request"], None, None);
-    let registered = app.register_key(&ctx, &envelope, Some("test")).await.unwrap();
+    let registered = app
+        .register_key(&ctx, &envelope, Some("test"))
+        .await
+        .unwrap();
     assert_eq!(registered["kid"], key["kid"]);
     (ctx, home)
 }
@@ -40,11 +51,23 @@ fn place(at: &str) -> String {
     format!(r#"{{"type":"place","data":{{"at":"{at}"}}}}"#)
 }
 
-async fn move_at(app: &App, ctx: &arena::app::AgentCtx, home: &Path, match_id: Uuid, at: &str) -> Value {
+async fn move_at(
+    app: &App,
+    ctx: &arena::app::AgentCtx,
+    home: &Path,
+    match_id: Uuid,
+    at: &str,
+) -> Value {
     let state = app.get_state(ctx, match_id).await.unwrap();
-    assert!(state["signing_request"].is_object(), "expected a turn, got {state}");
+    assert!(
+        state["signing_request"].is_object(),
+        "expected a turn, got {state}"
+    );
     let envelope = common::sign(home, &state["signing_request"], Some(&place(at)), None);
-    let accepted = app.make_move(ctx, match_id, envelope.clone(), None).await.unwrap();
+    let accepted = app
+        .make_move(ctx, match_id, envelope.clone(), None)
+        .await
+        .unwrap();
     assert_eq!(accepted["accepted"], json!(true), "{accepted}");
     envelope
 }
@@ -59,7 +82,10 @@ async fn signed_gomoku_log_verifies(pool: PgPool) {
     let (white, white_home) = seat(&app, "white@example.com", "white_agent", "白子").await;
 
     let room = app
-        .create_room(&black, &json!({"game": "gomoku", "variant": "free", "time_limit_sec": 60}))
+        .create_room(
+            &black,
+            &json!({"game": "gomoku", "variant": "free", "time_limit_sec": 60}),
+        )
         .await
         .unwrap();
     let match_id = Uuid::parse_str(room["match_id"].as_str().unwrap()).unwrap();
@@ -80,7 +106,10 @@ async fn signed_gomoku_log_verifies(pool: PgPool) {
         (&black, black_home.as_path(), "h12"),
     ];
     let first = move_at(&app, script[0].0, script[0].1, match_id, script[0].2).await;
-    let again = app.make_move(script[0].0, match_id, first, None).await.unwrap();
+    let again = app
+        .make_move(script[0].0, match_id, first, None)
+        .await
+        .unwrap();
     assert_eq!(again["accepted"], json!(true), "{again}");
     assert_eq!(again["idempotent"], json!(true), "{again}");
     for (ctx, home, at) in script.into_iter().skip(1) {
@@ -107,9 +136,15 @@ async fn ranked_queue_updates_glicko(pool: PgPool) {
     let app = App::boot(pool, server, cfg(&dir)).await.unwrap();
     let (black, _) = seat(&app, "rb@example.com", "rank_black", "排位黑").await;
     let (white, _) = seat(&app, "rw@example.com", "rank_white", "排位白").await;
-    let first = app.join_queue(&black, &json!({"game": "gomoku", "variant": "free"})).await.unwrap();
+    let first = app
+        .join_queue(&black, &json!({"game": "gomoku", "variant": "free"}))
+        .await
+        .unwrap();
     assert_eq!(first["status"], json!("queued"), "{first}");
-    let second = app.join_queue(&white, &json!({"game": "gomoku", "variant": "free"})).await.unwrap();
+    let second = app
+        .join_queue(&white, &json!({"game": "gomoku", "variant": "free"}))
+        .await
+        .unwrap();
     assert_eq!(second["status"], json!("matched"), "{second}");
     let match_id = Uuid::parse_str(second["match_id"].as_str().unwrap()).unwrap();
     let loser = if second["seat"] == 1 { &white } else { &black };

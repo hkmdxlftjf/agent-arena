@@ -87,15 +87,7 @@ impl Chain {
         let domain_v = domain(purpose);
         let signature = self.server.sign(&domain_v, &payload);
         let kid = self.server.kid.clone();
-        self.finish(
-            kind,
-            "server",
-            &kid,
-            domain_v,
-            payload,
-            signature,
-            now_ms(),
-        )
+        self.finish(kind, "server", &kid, domain_v, payload, signature, now_ms())
     }
 
     pub fn append_agent(

@@ -48,7 +48,12 @@ fn node_signature_roundtrips_through_the_hash_chain() {
             "deadline_at": now_ms() + 120_000,
         }
     });
-    let envelope = common::sign(&home, &request, Some(r#"{"type":"place","data":{"at":"h8"}}"#), Some("抢占天元。"));
+    let envelope = common::sign(
+        &home,
+        &request,
+        Some(r#"{"type":"place","data":{"at":"h8"}}"#),
+        Some("抢占天元。"),
+    );
     assert!(verify_value(
         key["public_key"].as_str().unwrap(),
         &envelope["domain"],
@@ -75,9 +80,13 @@ fn node_signature_roundtrips_through_the_hash_chain() {
     );
     assert_ne!(chain.entries[0]["prev_hash"], json!(""));
     assert_eq!(chain.entries[0]["prev_hash"], json!(zero_hash()));
-    let report = common::verify(&home, &chain.jsonl(), &json!({
-        "keys": [{"kid": server.kid, "alg": "ed25519", "public_key": server.public_b64}]
-    }));
+    let report = common::verify(
+        &home,
+        &chain.jsonl(),
+        &json!({
+            "keys": [{"kid": server.kid, "alg": "ed25519", "public_key": server.public_b64}]
+        }),
+    );
     assert_eq!(report["ok"], json!(true), "{report}");
     assert_eq!(report["agent_sigs"], json!(1));
     assert_eq!(report["acks"], json!(3));

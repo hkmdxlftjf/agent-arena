@@ -11,13 +11,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 fn cfg(dir: &Path) -> Config {
-    Config {
-        database_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://arena:arena@127.0.0.1:5432/arena".into()),
-        bind: "127.0.0.1:0".into(),
-        data_dir: dir.to_path_buf(),
-        public_url: "http://127.0.0.1".into(),
-        cookie_secure: false,
-    }
+    Config::for_test(dir.to_path_buf())
 }
 
 const SOURCE: &str = include_str!("../src/fixtures/tic-tac-toe.js");
@@ -27,18 +21,27 @@ async fn versions_stay_immutable_and_unpublish_blocks_rooms(pool: PgPool) {
     let dir = common::fresh_home("upload-data");
     let server = ServerKey::load_or_create(&dir).unwrap();
     let app = App::boot(pool.clone(), server, cfg(&dir)).await.unwrap();
-    let (user, _) = app.register("owner@example.com", "password123", "owner").await.unwrap();
+    let (user, _) = app
+        .register("owner@example.com", "password123", "owner")
+        .await
+        .unwrap();
     assert_eq!(user.role, "admin");
 
     let report = app.check_rules(&user, SOURCE).await.unwrap();
     assert_eq!(report["ok"], json!(true));
 
-    let first = app.publish_rules(&user, SOURCE, "tictactoe", Some("井字棋"), None).await.unwrap();
+    let first = app
+        .publish_rules(&user, SOURCE, "tictactoe", Some("井字棋"), None)
+        .await
+        .unwrap();
     assert_eq!(first["version"], "1.0.0");
     assert_eq!(first["id"], "u_tictactoe");
 
     let second_source = format!("{SOURCE}\n// second\n");
-    let second = app.publish_rules(&user, &second_source, "tictactoe", None, None).await.unwrap();
+    let second = app
+        .publish_rules(&user, &second_source, "tictactoe", None, None)
+        .await
+        .unwrap();
     assert_eq!(second["version"], "1.0.1");
     assert_ne!(first["rules_hash"], second["rules_hash"]);
 
@@ -55,7 +58,10 @@ async fn versions_stay_immutable_and_unpublish_blocks_rooms(pool: PgPool) {
 
     let (agent, _) = seat(&app, &user).await;
     let room = app
-        .create_room(&agent, &json!({"game": "u_tictactoe", "variant": "3", "time_limit_sec": 30}))
+        .create_room(
+            &agent,
+            &json!({"game": "u_tictactoe", "variant": "3", "time_limit_sec": 30}),
+        )
         .await
         .unwrap();
     let match_id: Uuid = room["match_id"].as_str().unwrap().parse().unwrap();
@@ -68,28 +74,48 @@ async fn versions_stay_immutable_and_unpublish_blocks_rooms(pool: PgPool) {
 
     app.unpublish_game(&user, "u_tictactoe").await.unwrap();
     let blocked = app
-        .create_room(&agent, &json!({"game": "u_tictactoe", "variant": "3", "time_limit_sec": 30}))
+        .create_room(
+            &agent,
+            &json!({"game": "u_tictactoe", "variant": "3", "time_limit_sec": 30}),
+        )
         .await
         .unwrap_err();
     assert_eq!(blocked.code, "game_not_playable");
 
-    let again = app.publish_rules(&user, SOURCE, "tictactoe", None, None).await.unwrap();
+    let again = app
+        .publish_rules(&user, SOURCE, "tictactoe", None, None)
+        .await
+        .unwrap();
     assert_eq!(again["version"], "1.0.2");
     app.hide_game(&user, "u_tictactoe").await.unwrap();
-    let hidden = app.publish_rules(&user, SOURCE, "tictactoe", None, None).await.unwrap_err();
+    let hidden = app
+        .publish_rules(&user, SOURCE, "tictactoe", None, None)
+        .await
+        .unwrap_err();
     assert_eq!(hidden.code, "hidden");
-    assert!(app.list_games().iter().all(|game| game["id"] != "u_tictactoe"));
+    assert!(app
+        .list_games()
+        .iter()
+        .all(|game| game["id"] != "u_tictactoe"));
 }
 
 async fn seat(app: &App, user: &arena::app::User) -> (arena::app::AgentCtx, std::path::PathBuf) {
-    let created = app.create_agent(user, "选手", None, None, false).await.unwrap();
+    let created = app
+        .create_agent(user, "选手", None, None, false)
+        .await
+        .unwrap();
     let agent_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
     let issued = app.issue_token(user, agent_id).await.unwrap();
-    let ctx = app.authenticate(issued["token"].as_str().unwrap()).await.unwrap();
+    let ctx = app
+        .authenticate(issued["token"].as_str().unwrap())
+        .await
+        .unwrap();
     let home = common::fresh_home("upload-agent");
     common::keygen(&home);
     let challenge = app.key_challenge(&ctx).await.unwrap();
     let envelope = common::sign(&home, &challenge["signing_request"], None, None);
-    app.register_key(&ctx, &envelope, Some("test")).await.unwrap();
+    app.register_key(&ctx, &envelope, Some("test"))
+        .await
+        .unwrap();
     (ctx, home)
 }

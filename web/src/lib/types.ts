@@ -152,6 +152,8 @@ export type User = {
   handle: string
   email: string
   role: string
+  github_login?: string | null
+  has_password?: boolean
 }
 
 export type AgentRow = {

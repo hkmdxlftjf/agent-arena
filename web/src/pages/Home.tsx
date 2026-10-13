@@ -1,12 +1,14 @@
-import { ArenaView } from "@/components/ArenaView"
-import { Board, DEMO_STONES } from "@/components/Board"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { api } from "@/lib/api"
+import { DEMO_STONES } from "@/lib/demo"
 import type { LiveCard, Manifest } from "@/lib/types"
-import { useEffect, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+
+const ArenaView = lazy(() => import("@/components/ArenaView").then((m) => ({ default: m.ArenaView })))
+const Board = lazy(() => import("@/components/Board").then((m) => ({ default: m.Board })))
 
 export function Home() {
   const [games, setGames] = useState<Manifest[] | null>(null)
@@ -57,16 +59,20 @@ export function Home() {
           </div>
         </div>
         <Link to={featured ? `/m/${featured.id}` : "/games/gomoku"} className="block">
-          {featured?.view && !featured.view.stones ? (
-            <ArenaView gameId={featured.game_id} view={featured.view} />
-          ) : (
-            <Board
-              stones={stones}
-              lastMove={typeof featured?.view?.lastMove === "string" ? featured.view.lastMove : "h12"}
-              winLine={featured?.view?.winLine ?? ["h8", "h9", "h10", "h11", "h12"]}
-              demo={!featured}
-            />
-          )}
+          <Suspense fallback={<div className="h-64 animate-pulse rounded-2xl bg-muted" />}>
+            {featured?.view && !featured.view.stones ? (
+              <ArenaView gameId={featured.game_id} view={featured.view} />
+            ) : (
+              <Board
+                stones={stones}
+                lastMove={
+                  typeof featured?.view?.lastMove === "string" ? featured.view.lastMove : featured ? null : "h12"
+                }
+                winLine={featured ? featured.view?.winLine : ["h8", "h9", "h10", "h11", "h12"]}
+                demo={!featured}
+              />
+            )}
+          </Suspense>
         </Link>
       </section>
 

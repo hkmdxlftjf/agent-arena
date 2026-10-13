@@ -136,7 +136,10 @@ impl Game for Gomoku {
             reason: None,
             moves: 0,
         };
-        Ok((to_value(&state), vec![json!({"type":"start","visibility":{"public":true}})]))
+        Ok((
+            to_value(&state),
+            vec![json!({"type":"start","visibility":{"public":true}})],
+        ))
     }
 
     fn to_act(&self, state: &Value) -> Vec<Seat> {
@@ -358,7 +361,9 @@ fn pick_near(state: &Value, rng: &mut dyn ArenaRng) -> Result<Value, GameError> 
             if st.variant == "renju" && st.turn == 0 && forbidden(&st, c, r) {
                 continue;
             }
-            let d = (c as i32 - lx as i32).abs().max((r as i32 - ly as i32).abs());
+            let d = (c as i32 - lx as i32)
+                .abs()
+                .max((r as i32 - ly as i32).abs());
             if d < best {
                 best = d;
                 cands.clear();
@@ -409,7 +414,13 @@ pub fn parse_at(s: &str) -> Option<(usize, usize)> {
     Some(((col - b'a') as usize, row - 1))
 }
 
-fn winning_line(board: &[u8], col: usize, row: usize, color: u8, variant: &str) -> Option<Vec<String>> {
+fn winning_line(
+    board: &[u8],
+    col: usize,
+    row: usize,
+    color: u8,
+    variant: &str,
+) -> Option<Vec<String>> {
     let dirs = [(1, 0), (0, 1), (1, 1), (1, -1)];
     let mut best: Option<Vec<String>> = None;
     for (dx, dy) in dirs {
@@ -489,7 +500,10 @@ fn open_ends(board: &[u8], col: usize, row: usize, dx: i32, dy: i32, color: u8) 
 fn end_open(board: &[u8], col: usize, row: usize, dx: i32, dy: i32, color: u8) -> bool {
     let mut c = col as i32 + dx;
     let mut r = row as i32 + dy;
-    while (0..N as i32).contains(&c) && (0..N as i32).contains(&r) && board[r as usize * N + c as usize] == color {
+    while (0..N as i32).contains(&c)
+        && (0..N as i32).contains(&r)
+        && board[r as usize * N + c as usize] == color
+    {
         c += dx;
         r += dy;
     }
@@ -507,12 +521,8 @@ mod tests {
         fn next_u64(&mut self) -> u64 {
             0
         }
-        fn int_n(&mut self, n: usize) -> usize {
-            if n == 0 {
-                0
-            } else {
-                0
-            }
+        fn int_n(&mut self, _n: usize) -> usize {
+            0
         }
     }
 
@@ -567,7 +577,15 @@ mod tests {
         let result = g.result(&state).unwrap();
         assert_eq!(result.reason, "five_in_row");
         assert_eq!(result.scores, vec![1.0, 0.0]);
-        let view = g.view(&state, &Viewer { seat: None, omniscient: false }).unwrap();
+        let view = g
+            .view(
+                &state,
+                &Viewer {
+                    seat: None,
+                    omniscient: false,
+                },
+            )
+            .unwrap();
         assert_eq!(view["winLine"].as_array().unwrap().len(), 5);
         assert!(g.to_act(&state).is_empty());
     }
@@ -622,11 +640,20 @@ mod tests {
         assert!(g.is_terminal(&state));
         let result = g.result(&state).unwrap();
         assert_eq!(result.scores[0], 1.0);
-        assert!(g.view(&state, &Viewer { seat: None, omniscient: false }).unwrap()["winLine"]
-            .as_array()
-            .unwrap()
-            .len()
-            >= 6);
+        assert!(
+            g.view(
+                &state,
+                &Viewer {
+                    seat: None,
+                    omniscient: false
+                }
+            )
+            .unwrap()["winLine"]
+                .as_array()
+                .unwrap()
+                .len()
+                >= 6
+        );
     }
 
     #[test]
@@ -731,7 +758,10 @@ mod tests {
             .timeout_decision(&state, 1, TimeoutPolicy::AutoAction, &mut rng_b)
             .unwrap();
         assert_eq!(a.action, b.action);
-        let at = a.action.unwrap()["data"]["at"].as_str().unwrap().to_string();
+        let at = a.action.unwrap()["data"]["at"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let (c, r) = parse_at(&at).unwrap();
         let dist = (c as i32 - 7).abs().max((r as i32 - 7).abs());
         assert_eq!(dist, 1);
@@ -753,11 +783,16 @@ mod tests {
         assert_eq!(spec.width, 15);
         assert_eq!(spec.coords, "intersection");
         let reg = Registry::builtin();
-        assert!(reg.board_spec("gomoku", &Config {
-            players: 2,
-            variant: "free".into(),
-            options: json!({}),
-        }).is_some());
+        assert!(reg
+            .board_spec(
+                "gomoku",
+                &Config {
+                    players: 2,
+                    variant: "free".into(),
+                    options: json!({}),
+                }
+            )
+            .is_some());
         assert!(reg.get("xiangqi").unwrap().manifest().playable);
         assert!(reg.get("mahjong-sichuan").unwrap().manifest().playable);
         assert_eq!(reg.list().len(), 6);

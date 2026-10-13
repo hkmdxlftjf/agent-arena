@@ -22,7 +22,11 @@ services:
       BIND_ADDR: 0.0.0.0:8080
       DATA_DIR: /data
       PUBLIC_URL: ${PUBLIC_URL:-https://arena.idou.top}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://agent.idou.bid}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     volumes:
       - ./data:/data
     depends_on:

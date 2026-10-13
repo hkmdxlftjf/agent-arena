@@ -17,7 +17,8 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("arena=info,tower_http=info")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("arena=info,tower_http=info")),
         )
         .init();
 
@@ -31,13 +32,18 @@ async fn main() -> anyhow::Result<()> {
         .connect(&cfg.database_url)
         .await
         .context("connect postgres")?;
-    sqlx::migrate!("./migrations").run(&pool).await.context("migrate")?;
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .context("migrate")?;
 
     let app = App::boot(pool, server, cfg.clone()).await?;
     let addr: SocketAddr = cfg.bind.parse().context("BIND_ADDR")?;
     let listener = TcpListener::bind(addr).await.context("bind")?;
     tracing::info!(%addr, "agent arena listening");
-    axum::serve(listener, arena::http::router(app)).await.context("serve")?;
+    axum::serve(listener, arena::http::router(app))
+        .await
+        .context("serve")?;
     Ok(())
 }
 
@@ -52,7 +58,10 @@ fn healthcheck() -> anyhow::Result<()> {
     let mut buf = [0u8; 512];
     let n = stream.read(&mut buf).unwrap_or(0);
     let text = String::from_utf8_lossy(&buf[..n]);
-    if text.contains(" 200 ") || text.starts_with("HTTP/1.1 200") || text.starts_with("HTTP/1.0 200") {
+    if text.contains(" 200 ")
+        || text.starts_with("HTTP/1.1 200")
+        || text.starts_with("HTTP/1.0 200")
+    {
         std::process::exit(0);
     }
     eprintln!("healthcheck failed: {text}");

@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 
-const NAMES: [&str; 12] = ["司令", "军长", "师长", "旅长", "团长", "营长", "连长", "排长", "工兵", "炸弹", "地雷", "军旗"];
+const NAMES: [&str; 12] = [
+    "司令", "军长", "师长", "旅长", "团长", "营长", "连长", "排长", "工兵", "炸弹", "地雷", "军旗",
+];
 const COUNTS: [usize; 12] = [1, 1, 2, 2, 2, 2, 3, 3, 3, 2, 3, 1];
 const RANKS: [i8; 12] = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0];
 
@@ -48,17 +50,43 @@ impl Junqi {
 
 pub fn standard_layout(seat: u8) -> Vec<Value> {
     let south = [
-        ("a1", "军旗"), ("b1", "司令"), ("c1", "军长"), ("d1", "师长"),
-        ("a2", "地雷"), ("b2", "地雷"), ("c2", "地雷"), ("d2", "炸弹"), ("e2", "炸弹"),
-        ("a3", "师长"), ("c3", "旅长"), ("e3", "旅长"),
-        ("a4", "团长"), ("b4", "团长"), ("d4", "营长"), ("e4", "营长"),
-        ("a5", "连长"), ("c5", "连长"), ("e5", "连长"), ("d5", "排长"),
-        ("a6", "排长"), ("b6", "排长"), ("c6", "工兵"), ("d6", "工兵"), ("e6", "工兵"),
+        ("a1", "军旗"),
+        ("b1", "司令"),
+        ("c1", "军长"),
+        ("d1", "师长"),
+        ("a2", "地雷"),
+        ("b2", "地雷"),
+        ("c2", "地雷"),
+        ("d2", "炸弹"),
+        ("e2", "炸弹"),
+        ("a3", "师长"),
+        ("c3", "旅长"),
+        ("e3", "旅长"),
+        ("a4", "团长"),
+        ("b4", "团长"),
+        ("d4", "营长"),
+        ("e4", "营长"),
+        ("a5", "连长"),
+        ("c5", "连长"),
+        ("e5", "连长"),
+        ("d5", "排长"),
+        ("a6", "排长"),
+        ("b6", "排长"),
+        ("c6", "工兵"),
+        ("d6", "工兵"),
+        ("e6", "工兵"),
     ];
-    south.iter().map(|(at, name)| {
-        let at = if seat == 0 { (*at).to_string() } else { mirror(at) };
-        json!({"at": at, "piece": name})
-    }).collect()
+    south
+        .iter()
+        .map(|(at, name)| {
+            let at = if seat == 0 {
+                (*at).to_string()
+            } else {
+                mirror(at)
+            };
+            json!({"at": at, "piece": name})
+        })
+        .collect()
 }
 
 fn mirror(at: &str) -> String {
@@ -72,10 +100,16 @@ fn square(f: usize, r: usize) -> String {
 
 fn parse(s: &str) -> Option<(usize, usize)> {
     let b = s.as_bytes();
-    if b.len() < 2 { return None; }
+    if b.len() < 2 {
+        return None;
+    }
     let f = (b[0].to_ascii_lowercase() - b'a') as usize;
     let r: usize = s[1..].parse().ok()?;
-    if f < 5 && (1..=12).contains(&r) { Some((f, r)) } else { None }
+    if f < 5 && (1..=12).contains(&r) {
+        Some((f, r))
+    } else {
+        None
+    }
 }
 
 fn is_hq(f: usize, r: usize) -> bool {
@@ -83,22 +117,37 @@ fn is_hq(f: usize, r: usize) -> bool {
 }
 
 fn is_camp(f: usize, r: usize) -> bool {
-    matches!((f, r), (1, 3) | (3, 3) | (2, 4) | (1, 5) | (3, 5) | (1, 10) | (3, 10) | (2, 9) | (1, 8) | (3, 8))
+    matches!(
+        (f, r),
+        (1, 3) | (3, 3) | (2, 4) | (1, 5) | (3, 5) | (1, 10) | (3, 10) | (2, 9) | (1, 8) | (3, 8)
+    )
 }
 
 fn own_half(seat: u8, r: usize) -> bool {
-    if seat == 0 { (1..=6).contains(&r) } else { (7..=12).contains(&r) }
+    if seat == 0 {
+        (1..=6).contains(&r)
+    } else {
+        (7..=12).contains(&r)
+    }
 }
 
 fn on_rail(f: usize, r: usize) -> bool {
-    if is_hq(f, r) || is_camp(f, r) { return false; }
-    if f == 0 || f == 4 { return (2..=11).contains(&r); }
-    if r == 1 || r == 12 { return (1..=3).contains(&f); }
+    if is_hq(f, r) || is_camp(f, r) {
+        return false;
+    }
+    if f == 0 || f == 4 {
+        return (2..=11).contains(&r);
+    }
+    if r == 1 || r == 12 {
+        return (1..=3).contains(&f);
+    }
     r == 6 || r == 7
 }
 
 fn rail_neighbors(f: usize, r: usize) -> Vec<(usize, usize)> {
-    if !on_rail(f, r) { return Vec::new(); }
+    if !on_rail(f, r) {
+        return Vec::new();
+    }
     let mut v = Vec::new();
     for (df, dr) in [(1i32, 0), (-1, 0), (0, 1), (0, -1)] {
         let nf = f as i32 + df;
@@ -130,7 +179,11 @@ fn orthogonal(f: usize, r: usize) -> Vec<(usize, usize)> {
 }
 
 fn rank_of(name: &str) -> i8 {
-    NAMES.iter().position(|n| *n == name).map(|i| RANKS[i]).unwrap_or(0)
+    NAMES
+        .iter()
+        .position(|n| *n == name)
+        .map(|i| RANKS[i])
+        .unwrap_or(0)
 }
 
 fn movable(name: &str) -> bool {
@@ -138,17 +191,34 @@ fn movable(name: &str) -> bool {
 }
 
 fn fight(att: &str, def: &str) -> &'static str {
-    if def == "军旗" { return "flag"; }
-    if att == "炸弹" || def == "炸弹" { return "both"; }
-    if def == "地雷" { return if att == "工兵" { "eat" } else { "eaten" }; }
-    if att == "地雷" || att == "军旗" { return "eaten"; }
+    if def == "军旗" {
+        return "flag";
+    }
+    if att == "炸弹" || def == "炸弹" {
+        return "both";
+    }
+    if def == "地雷" {
+        return if att == "工兵" { "eat" } else { "eaten" };
+    }
+    if att == "地雷" || att == "军旗" {
+        return "eaten";
+    }
     let a = rank_of(att);
     let d = rank_of(def);
-    if a > d { "eat" } else if a < d { "eaten" } else { "both" }
+    if a > d {
+        "eat"
+    } else if a < d {
+        "eaten"
+    } else {
+        "both"
+    }
 }
 
 fn placements_of(action: &Value) -> Option<Vec<(String, String)>> {
-    let data = action.get("_private").and_then(|p| p.get("data")).or_else(|| action.get("data"));
+    let data = action
+        .get("_private")
+        .and_then(|p| p.get("data"))
+        .or_else(|| action.get("data"));
     let arr = data?.get("placements")?.as_array()?;
     let mut out = Vec::new();
     for item in arr {
@@ -159,7 +229,10 @@ fn placements_of(action: &Value) -> Option<Vec<(String, String)>> {
     Some(out)
 }
 
-fn validate_layout(seat: u8, items: &[(String, String)]) -> Result<HashMap<String, Piece>, GameError> {
+fn validate_layout(
+    seat: u8,
+    items: &[(String, String)],
+) -> Result<HashMap<String, Piece>, GameError> {
     if items.len() != 25 {
         return Err(GameError("布阵必须正好 25 枚".into()));
     }
@@ -186,7 +259,13 @@ fn validate_layout(seat: u8, items: &[(String, String)]) -> Result<HashMap<Strin
             return Err(GameError("地雷只能放在后两排".into()));
         }
         *counts.entry(name.clone()).or_default() += 1;
-        board.insert(at.clone(), Piece { owner: seat, name: name.clone() });
+        board.insert(
+            at.clone(),
+            Piece {
+                owner: seat,
+                name: name.clone(),
+            },
+        );
     }
     for (i, name) in NAMES.iter().enumerate() {
         if counts.get(*name).copied().unwrap_or(0) != COUNTS[i] {
@@ -197,22 +276,33 @@ fn validate_layout(seat: u8, items: &[(String, String)]) -> Result<HashMap<Strin
 }
 
 fn destinations(state: &JState, at: &str) -> Vec<String> {
-    let Some(piece) = state.board.get(at) else { return Vec::new() };
-    if !movable(&piece.name) { return Vec::new() }
+    let Some(piece) = state.board.get(at) else {
+        return Vec::new();
+    };
+    if !movable(&piece.name) {
+        return Vec::new();
+    }
     let (f, r) = parse(at).unwrap();
     let from_camp = is_camp(f, r);
     let mut out = Vec::new();
-    let consider = |out: &mut Vec<String>, state: &JState, nf: usize, nr: usize, from_camp: bool| {
-        let dest = square(nf, nr);
-        if let Some(other) = state.board.get(&dest) {
-            if other.owner == state.board.get(at).map(|p| p.owner).unwrap_or(9) { return; }
-            if from_camp || is_camp(nf, nr) { return; }
-            if is_hq(nf, nr) && other.name != "军旗" { return; }
-        } else if is_hq(nf, nr) {
-            return;
-        }
-        out.push(dest);
-    };
+    let consider =
+        |out: &mut Vec<String>, state: &JState, nf: usize, nr: usize, from_camp: bool| {
+            let dest = square(nf, nr);
+            if let Some(other) = state.board.get(&dest) {
+                if other.owner == state.board.get(at).map(|p| p.owner).unwrap_or(9) {
+                    return;
+                }
+                if from_camp || is_camp(nf, nr) {
+                    return;
+                }
+                if is_hq(nf, nr) && other.name != "军旗" {
+                    return;
+                }
+            } else if is_hq(nf, nr) {
+                return;
+            }
+            out.push(dest);
+        };
     for (nf, nr) in orthogonal(f, r) {
         consider(&mut out, state, nf, nr, from_camp);
     }
@@ -224,7 +314,9 @@ fn destinations(state: &JState, at: &str) -> Vec<String> {
             seen.insert((f, r));
             while let Some((cf, cr)) = q.pop_front() {
                 for (nf, nr) in rail_neighbors(cf, cr) {
-                    if seen.contains(&(nf, nr)) { continue; }
+                    if seen.contains(&(nf, nr)) {
+                        continue;
+                    }
                     let dest = square(nf, nr);
                     if let Some(other) = state.board.get(&dest) {
                         if other.owner != piece.owner && !is_camp(nf, nr) {
@@ -241,7 +333,12 @@ fn destinations(state: &JState, at: &str) -> Vec<String> {
             for (df, dr) in [(1i32, 0), (-1, 0), (0, 1), (0, -1)] {
                 let mut nf = f as i32 + df;
                 let mut nr = r as i32 + dr;
-                while (0..5).contains(&nf) && (1..=12).contains(&nr) && on_rail(nf as usize, nr as usize) && rail_neighbors((nf - df) as usize, (nr - dr) as usize).contains(&(nf as usize, nr as usize)) {
+                while (0..5).contains(&nf)
+                    && (1..=12).contains(&nr)
+                    && on_rail(nf as usize, nr as usize)
+                    && rail_neighbors((nf - df) as usize, (nr - dr) as usize)
+                        .contains(&(nf as usize, nr as usize))
+                {
                     let dest = square(nf as usize, nr as usize);
                     if let Some(other) = state.board.get(&dest) {
                         if other.owner != piece.owner && !is_camp(nf as usize, nr as usize) {
@@ -262,7 +359,10 @@ fn destinations(state: &JState, at: &str) -> Vec<String> {
 }
 
 fn any_move(state: &JState, seat: u8) -> bool {
-    state.board.iter().any(|(at, p)| p.owner == seat && !destinations(state, at).is_empty())
+    state
+        .board
+        .iter()
+        .any(|(at, p)| p.owner == seat && !destinations(state, at).is_empty())
 }
 
 fn show_piece(piece: &Piece, viewer: &Viewer) -> Value {
@@ -283,10 +383,22 @@ impl Game for Junqi {
             min_players: 2,
             max_players: 2,
             traits: vec![Trait::Board, Trait::HiddenInfo, Trait::MultiPhase],
-            variants: vec![Variant { id: "standard".into(), name: "两人暗棋".into(), options: None }],
-            default_time: TimeControl { per_action_ms: 60_000, max_consecutive_timeouts: 3, grace_ms: 2_000 },
+            variants: vec![Variant {
+                id: "standard".into(),
+                name: "两人暗棋".into(),
+                options: None,
+            }],
+            default_time: TimeControl {
+                per_action_ms: 60_000,
+                max_consecutive_timeouts: 3,
+                grace_ms: 2_000,
+            },
             timeout_policy: TimeoutPolicy::AutoPass,
-            allowed_timeout_policies: vec![TimeoutPolicy::AutoPass, TimeoutPolicy::AutoAction, TimeoutPolicy::Forfeit],
+            allowed_timeout_policies: vec![
+                TimeoutPolicy::AutoPass,
+                TimeoutPolicy::AutoAction,
+                TimeoutPolicy::Forfeit,
+            ],
             action_schema: json!({"type":"object"}),
             rules_markdown: JUNQI_RULES.into(),
             renderer: "junqi".into(),
@@ -298,16 +410,36 @@ impl Game for Junqi {
     }
 
     fn setup(&self, cfg: &Config, _: &mut dyn ArenaRng) -> Result<(Value, Vec<Value>), GameError> {
-        if cfg.variant != "standard" { return Err(GameError("未知变体".into())); }
-        let s = JState { phase: "deploy".into(), board: HashMap::new(), deployed: vec![false, false], turn: 0, last: None, winner: None, reason: None };
+        if cfg.variant != "standard" {
+            return Err(GameError("未知变体".into()));
+        }
+        let s = JState {
+            phase: "deploy".into(),
+            board: HashMap::new(),
+            deployed: vec![false, false],
+            turn: 0,
+            last: None,
+            winner: None,
+            reason: None,
+        };
         Ok((serde_json::to_value(s).unwrap(), Vec::new()))
     }
 
     fn to_act(&self, state: &Value) -> Vec<Seat> {
-        let Ok(s) = Self::load(state) else { return Vec::new() };
-        if s.winner.is_some() { return Vec::new(); }
+        let Ok(s) = Self::load(state) else {
+            return Vec::new();
+        };
+        if s.winner.is_some() {
+            return Vec::new();
+        }
         if s.phase == "deploy" {
-            return s.deployed.iter().enumerate().filter(|(_, d)| !**d).map(|(i, _)| i as Seat).collect();
+            return s
+                .deployed
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| !**d)
+                .map(|(i, _)| i as Seat)
+                .collect();
         }
         vec![s.turn as Seat]
     }
@@ -318,7 +450,15 @@ impl Game for Junqi {
         for r in 1..=12 {
             for f in 0..5 {
                 let at = square(f, r);
-                let zone = if is_hq(f, r) { "hq" } else if is_camp(f, r) { "camp" } else if on_rail(f, r) { "rail" } else { "road" };
+                let zone = if is_hq(f, r) {
+                    "hq"
+                } else if is_camp(f, r) {
+                    "camp"
+                } else if on_rail(f, r) {
+                    "rail"
+                } else {
+                    "road"
+                };
                 let piece = s.board.get(&at).map(|p| show_piece(p, viewer));
                 cells.push(json!({"at": at, "zone": zone, "piece": piece}));
             }
@@ -337,7 +477,9 @@ impl Game for Junqi {
 
     fn legal_actions(&self, state: &Value, seat: Seat) -> Result<Vec<Value>, GameError> {
         let s = Self::load(state)?;
-        if s.winner.is_some() { return Ok(Vec::new()); }
+        if s.winner.is_some() {
+            return Ok(Vec::new());
+        }
         let mut actions = vec![json!({"type":"resign"})];
         if s.phase == "deploy" {
             if seat >= 0 && (seat as usize) < s.deployed.len() && !s.deployed[seat as usize] {
@@ -345,9 +487,13 @@ impl Game for Junqi {
             }
             return Ok(actions);
         }
-        if seat as u8 != s.turn { return Ok(actions); }
+        if seat as u8 != s.turn {
+            return Ok(actions);
+        }
         for (at, piece) in &s.board {
-            if piece.owner != s.turn { continue; }
+            if piece.owner != s.turn {
+                continue;
+            }
             for dest in destinations(&s, at) {
                 actions.push(json!({"type":"move","data":{"from": at, "to": dest}}));
             }
@@ -355,13 +501,25 @@ impl Game for Junqi {
         Ok(actions)
     }
 
-    fn apply(&self, state: &Value, seat: Seat, action: &Value, _: &mut dyn ArenaRng) -> Result<(Value, Vec<Value>), GameError> {
+    fn apply(
+        &self,
+        state: &Value,
+        seat: Seat,
+        action: &Value,
+        _: &mut dyn ArenaRng,
+    ) -> Result<(Value, Vec<Value>), GameError> {
         let mut s = Self::load(state)?;
-        if s.winner.is_some() { return Err(GameError("对局已结束".into())); }
+        if s.winner.is_some() {
+            return Err(GameError("对局已结束".into()));
+        }
         let kind = action.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if kind == "resign" || kind == "timeout_forfeit" {
             s.winner = Some(1 - seat as i8);
-            s.reason = Some(if kind == "resign" { "resign".into() } else { "timeout".into() });
+            s.reason = Some(if kind == "resign" {
+                "resign".into()
+            } else {
+                "timeout".into()
+            });
             s.phase = "over".into();
             return Ok((serde_json::to_value(s).unwrap(), Vec::new()));
         }
@@ -374,7 +532,9 @@ impl Game for Junqi {
             }
             let items = placements_of(action).ok_or_else(|| GameError("缺少布阵".into()))?;
             let placed = validate_layout(seat as u8, &items)?;
-            for (at, piece) in placed { s.board.insert(at, piece); }
+            for (at, piece) in placed {
+                s.board.insert(at, piece);
+            }
             s.deployed[seat as usize] = true;
             if s.deployed.iter().all(|d| *d) {
                 s.phase = "play".into();
@@ -387,7 +547,9 @@ impl Game for Junqi {
             }
             return Ok((serde_json::to_value(s).unwrap(), Vec::new()));
         }
-        if seat as u8 != s.turn { return Err(GameError("还没轮到你".into())); }
+        if seat as u8 != s.turn {
+            return Err(GameError("还没轮到你".into()));
+        }
         if kind == "pass" {
             s.turn = 1 - s.turn;
             s.last = Some(json!({"type":"pass","seat": seat}));
@@ -398,14 +560,22 @@ impl Game for Junqi {
             }
             return Ok((serde_json::to_value(s).unwrap(), Vec::new()));
         }
-        if kind != "move" { return Err(GameError("未知动作".into())); }
+        if kind != "move" {
+            return Err(GameError("未知动作".into()));
+        }
         let from = action["data"]["from"].as_str().unwrap_or("").to_string();
         let to = action["data"]["to"].as_str().unwrap_or("").to_string();
         if !destinations(&s, &from).iter().any(|d| d == &to) {
             return Err(GameError("这步棋不合法".into()));
         }
-        let attacker = s.board.get(&from).cloned().ok_or_else(|| GameError("起点没有棋子".into()))?;
-        if attacker.owner != seat as u8 { return Err(GameError("不能动对方的子".into())); }
+        let attacker = s
+            .board
+            .get(&from)
+            .cloned()
+            .ok_or_else(|| GameError("起点没有棋子".into()))?;
+        if attacker.owner != seat as u8 {
+            return Err(GameError("不能动对方的子".into()));
+        }
         let outcome = if let Some(defender) = s.board.get(&to).cloned() {
             let result = fight(&attacker.name, &defender.name);
             match result {
@@ -420,7 +590,9 @@ impl Game for Junqi {
                     s.board.remove(&from);
                     s.board.insert(to.clone(), attacker);
                 }
-                "eaten" => { s.board.remove(&from); }
+                "eaten" => {
+                    s.board.remove(&from);
+                }
                 _ => {
                     s.board.remove(&from);
                     s.board.remove(&to);
@@ -445,7 +617,9 @@ impl Game for Junqi {
     }
 
     fn is_terminal(&self, state: &Value) -> bool {
-        Self::load(state).map(|s| s.winner.is_some()).unwrap_or(true)
+        Self::load(state)
+            .map(|s| s.winner.is_some())
+            .unwrap_or(true)
     }
 
     fn result(&self, state: &Value) -> Result<GameResult, GameError> {
@@ -456,12 +630,26 @@ impl Game for Junqi {
         } else {
             (vec![0.0, 1.0], vec![vec![1], vec![0]])
         };
-        Ok(GameResult { scores, ranking, teams: None, reason: s.reason.unwrap_or_else(|| "junqi".into()) })
+        Ok(GameResult {
+            scores,
+            ranking,
+            teams: None,
+            reason: s.reason.unwrap_or_else(|| "junqi".into()),
+        })
     }
 
-    fn timeout_decision(&self, state: &Value, seat: Seat, policy: TimeoutPolicy, _: &mut dyn ArenaRng) -> Result<TimeoutDecision, GameError> {
+    fn timeout_decision(
+        &self,
+        state: &Value,
+        seat: Seat,
+        policy: TimeoutPolicy,
+        _: &mut dyn ArenaRng,
+    ) -> Result<TimeoutDecision, GameError> {
         if policy == TimeoutPolicy::Forfeit {
-            return Ok(TimeoutDecision { policy, action: Some(json!({"type":"resign"})) });
+            return Ok(TimeoutDecision {
+                policy,
+                action: Some(json!({"type":"resign"})),
+            });
         }
         let s = Self::load(state)?;
         if s.phase == "deploy" {
@@ -471,7 +659,10 @@ impl Game for Junqi {
                 action: Some(json!({"type":"deploy","data":{"placements": placements}})),
             });
         }
-        Ok(TimeoutDecision { policy: TimeoutPolicy::AutoPass, action: Some(json!({"type":"pass"})) })
+        Ok(TimeoutDecision {
+            policy: TimeoutPolicy::AutoPass,
+            action: Some(json!({"type":"pass"})),
+        })
     }
 }
 
@@ -495,7 +686,16 @@ mod tests {
     fn setup() -> Value {
         let g = Junqi;
         let mut rng = crate::game::SeededRng::from_seed_seq(&[7; 32], 0);
-        g.setup(&Config { players: 2, variant: "standard".into(), options: json!({}) }, &mut rng).unwrap().0
+        g.setup(
+            &Config {
+                players: 2,
+                variant: "standard".into(),
+                options: json!({}),
+            },
+            &mut rng,
+        )
+        .unwrap()
+        .0
     }
 
     fn deploy(state: Value, seat: i32) -> Value {
@@ -513,15 +713,51 @@ mod tests {
         assert_eq!(s.board.len(), 50);
         let g = Junqi;
         let mut rng = crate::game::SeededRng::from_seed_seq(&[1; 32], 0);
-        let moved = g.apply(&state, 0, &json!({"type":"move","data":{"from":"b4","to":"b3"}}), &mut rng).unwrap().0;
+        let moved = g
+            .apply(
+                &state,
+                0,
+                &json!({"type":"move","data":{"from":"b4","to":"b3"}}),
+                &mut rng,
+            )
+            .unwrap()
+            .0;
         assert_eq!(Junqi::load(&moved).unwrap().turn, 1);
 
         let mut board = HashMap::new();
-        board.insert("a1".into(), Piece { owner: 0, name: "军旗".into() });
-        board.insert("a2".into(), Piece { owner: 1, name: "司令".into() });
-        let s = JState { phase: "play".into(), board, deployed: vec![true, true], turn: 1, last: None, winner: None, reason: None };
+        board.insert(
+            "a1".into(),
+            Piece {
+                owner: 0,
+                name: "军旗".into(),
+            },
+        );
+        board.insert(
+            "a2".into(),
+            Piece {
+                owner: 1,
+                name: "司令".into(),
+            },
+        );
+        let s = JState {
+            phase: "play".into(),
+            board,
+            deployed: vec![true, true],
+            turn: 1,
+            last: None,
+            winner: None,
+            reason: None,
+        };
         let state = serde_json::to_value(s).unwrap();
-        let next = g.apply(&state, 1, &json!({"type":"move","data":{"from":"a2","to":"a1"}}), &mut rng).unwrap().0;
+        let next = g
+            .apply(
+                &state,
+                1,
+                &json!({"type":"move","data":{"from":"a2","to":"a1"}}),
+                &mut rng,
+            )
+            .unwrap()
+            .0;
         let result = g.result(&next).unwrap();
         assert_eq!(result.reason, "flag");
         assert_eq!(result.scores, vec![0.0, 1.0]);
@@ -536,21 +772,69 @@ mod tests {
         assert_eq!(fight("师长", "军旗"), "flag");
         let g = Junqi;
         let mut board = HashMap::new();
-        board.insert("c6".into(), Piece { owner: 0, name: "炸弹".into() });
-        board.insert("c7".into(), Piece { owner: 1, name: "司令".into() });
-        board.insert("a1".into(), Piece { owner: 0, name: "军旗".into() });
-        board.insert("a12".into(), Piece { owner: 1, name: "军旗".into() });
-        let s = JState { phase: "play".into(), board, deployed: vec![true, true], turn: 0, last: None, winner: None, reason: None };
+        board.insert(
+            "c6".into(),
+            Piece {
+                owner: 0,
+                name: "炸弹".into(),
+            },
+        );
+        board.insert(
+            "c7".into(),
+            Piece {
+                owner: 1,
+                name: "司令".into(),
+            },
+        );
+        board.insert(
+            "a1".into(),
+            Piece {
+                owner: 0,
+                name: "军旗".into(),
+            },
+        );
+        board.insert(
+            "a12".into(),
+            Piece {
+                owner: 1,
+                name: "军旗".into(),
+            },
+        );
+        let s = JState {
+            phase: "play".into(),
+            board,
+            deployed: vec![true, true],
+            turn: 0,
+            last: None,
+            winner: None,
+            reason: None,
+        };
         let state = serde_json::to_value(s).unwrap();
-        let view = g.view(&state, &Viewer { seat: Some(0), omniscient: false }).unwrap();
+        let view = g
+            .view(
+                &state,
+                &Viewer {
+                    seat: Some(0),
+                    omniscient: false,
+                },
+            )
+            .unwrap();
         let cells = view["cells"].as_array().unwrap();
         let bomb = cells.iter().find(|c| c["at"] == "c6").unwrap();
         let enemy = cells.iter().find(|c| c["at"] == "c7").unwrap();
         assert_eq!(bomb["piece"]["name"], "炸弹");
         assert_eq!(enemy["piece"]["name"], "暗");
         let mut rng = crate::game::SeededRng::from_seed_seq(&[2; 32], 0);
-        let next = g.apply(&state, 0, &json!({"type":"move","data":{"from":"c6","to":"c7"}}), &mut rng).unwrap().0;
+        let next = g
+            .apply(
+                &state,
+                0,
+                &json!({"type":"move","data":{"from":"c6","to":"c7"}}),
+                &mut rng,
+            )
+            .unwrap()
+            .0;
         assert_eq!(next["last"]["result"], "both");
-        assert!(Junqi::load(&next).unwrap().board.get("c7").is_none());
+        assert!(!Junqi::load(&next).unwrap().board.contains_key("c7"));
     }
 }

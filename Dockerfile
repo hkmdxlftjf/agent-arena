@@ -13,6 +13,7 @@ COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY migrations ./migrations
 COPY skill ./skill
+COPY scripts ./scripts
 COPY --from=web /src/dist ./web/dist
 COPY sdk ./sdk
 COPY src ./src
@@ -27,7 +28,10 @@ COPY --from=rust /src/target/release/arena /usr/local/bin/arena
 ENV BIND_ADDR=0.0.0.0:8080 \
     DATA_DIR=/data \
     PUBLIC_URL=https://arena.idou.top \
-    COOKIE_SECURE=false
+    PUBLIC_BASE_URL=https://agent.idou.bid \
+    COOKIE_SECURE=false \
+    GITHUB_CLIENT_ID= \
+    GITHUB_CLIENT_SECRET=
 VOLUME /data
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s CMD ["arena", "healthcheck"]
