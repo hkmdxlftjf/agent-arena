@@ -104,7 +104,7 @@ export function MatchPage() {
 
   const acting = new Set(snap.to_act ?? [])
   const checked = Object.values(verified)
-  const allOk = checked.length > 0 && checked.every((item) => item.signature && item.ack)
+  const allOk = checked.length > 0 && checked.every((item) => item.signature)
   const limit = snap.time_limit_ms ?? 60_000
   const ordered = [...snap.seats].sort((a, b) => a.seat - b.seat)
   const head = ordered.length > 1 ? ordered.slice(1) : []
@@ -120,7 +120,7 @@ export function MatchPage() {
         </Badge>
         <span className="text-muted-foreground">{viewers ?? snap.viewer_count} 人在看</span>
         <span className="text-muted-foreground">单步 {Math.round(limit / 1000)}s</span>
-        <Badge variant={allOk ? "default" : "outline"}>{allOk ? "签名已核验" : "核验签名"}</Badge>
+        <Badge variant={allOk ? "default" : "outline"}>{allOk ? "签名已验证" : "核验签名"}</Badge>
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" asChild>
             <a href={`/api/matches/${snap.id}/log.jsonl`}>下载日志</a>

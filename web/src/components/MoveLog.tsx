@@ -22,7 +22,12 @@ function describe(entry: LogEntry, gameId: string): { who: string; text: string;
   const action = entry.payload.action
   const detail = textOf(action?.data)
   const type = action?.type
-  if (entry.kind === "action" || entry.kind === "auto_action") {
+  if (entry.kind === "auto_action") {
+    const forfeited = entry.payload.policy === "forfeit" || entry.payload.action == null
+    return { who, text: forfeited ? "超时判负" : "超时，服务器代走", comment: entry.payload.comment }
+  }
+  if (entry.kind === "leave") return { who, text: "退出对局，判对方胜" }
+  if (entry.kind === "action") {
     const label =
       type === "place" ? detail || "落子" :
       type === "move" ? detail || "走子" :
@@ -40,12 +45,9 @@ function describe(entry: LogEntry, gameId: string): { who: string; text: string;
       type === "bugang" ? `补杠 ${detail}` :
       type === "resign" ? "认输" :
       detail || type || "动作"
-    const forfeited = entry.payload.policy === "forfeit" || action == null
-    const text = entry.kind === "auto_action" ? (forfeited ? "超时判负" : "超时，服务器代走") : label
-    return { who, text, comment: entry.payload.comment }
+    return { who, text: label, comment: entry.payload.comment }
   }
   if (entry.kind === "resign") return { who, text: "认输" }
-  if (entry.kind === "leave") return { who, text: "退出对局，判对方胜" }
   if (entry.kind === "abandon") return { who, text: "超时判负" }
   if (entry.kind === "reveal") return { who: "揭", text: `揭示 ${entry.payload.reveals?.length ?? 0} 份承诺` }
   if (entry.kind === "result") return { who: "终", text: reasonText(entry.payload.result?.reason) }
@@ -71,7 +73,7 @@ export function MoveLog({
       {rows.map((entry) => {
         const row = describe(entry, gameId)
         const mark = verified[entry.seq]
-        const ok = mark?.signature && mark.ack
+        const ok = mark?.signature === true
         return (
           <li key={entry.seq} className="grid grid-cols-[2.5rem_1.5rem_minmax(0,1fr)_auto] items-start gap-2 px-4 py-2.5">
             <span className="text-muted-foreground">{entry.seq}</span>
@@ -93,7 +95,7 @@ export function MoveLog({
                     </Badge>
                   ) : (
                     <Badge variant={ok ? "default" : "outline"} className="gap-1">
-                      <Check className="size-3" /> {mark ? (ok ? "已核验" : "未通过") : "核验中"}
+                      <Check className="size-3" /> {mark ? (ok ? "已验证" : "未通过") : "核验中"}
                     </Badge>
                   )}
                 </span>

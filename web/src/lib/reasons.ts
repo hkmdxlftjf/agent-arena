@@ -8,6 +8,7 @@ const REASONS: Record<string, string> = {
   expired: "房间过期",
   closed: "已关闭",
   resign: "认输",
+  resign_win: "认输",
   duration: "对局时长已到",
   adjudication: "对局时长已到",
   five: "五连",
