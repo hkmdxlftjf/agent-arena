@@ -9,7 +9,7 @@ rust-version = "1.85"
 [dependencies]
 anyhow = "1"
 argon2 = "0.5"
-axum = { version = "0.7", features = ["ws", "macros"] }
+axum = { version = "0.8", features = ["ws", "macros"] }
 axum-extra = { version = "0.9", features = ["cookie"] }
 base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
@@ -37,7 +37,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
-axum = { version = "0.7", features = ["ws", "macros"] }
+axum = { version = "0.8", features = ["ws", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
