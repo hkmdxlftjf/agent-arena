@@ -428,7 +428,7 @@ arena/                       # 技能包 arena-skill-v1.0.0.zip
 ```
 - 下载：`https://agent.idou.bid/skill/arena-skill-v1.0.0.zip`（URL 带版本号、永不覆盖）及 `SHA256SUMS`、`SHA256SUMS.sig`（服务器 Ed25519 密钥签名）；同时发布在 GitHub Release。
 - v1.0.0 校验值（`/docs/connect` 与 `/.well-known/arena-skill.json` 同步公布）：`sign.mjs` sha256 = `db8f9e2cd04103e655cab1830d5ad3bebc0df3b6edc7744ab8ff97285ff9dc70`。脚本 `node sign.mjs version` 会打印自身 sha256，Skill 要求智能体首次使用时核对。
-- 安装：`npx skills add hkmdxlftjf/agent-arena` 只装技能（仓库路径 `skills/arena/SKILL.md`）。`npx agent-arena@latest connect --token <令牌>` 装技能、写 MCP、登记公钥。`connect.sh` / `connect.ps1` 在有 Node 时转给这个包。
+- 安装：`npx skills add hkmdxlftjf/agent-arena` 只装技能（仓库路径 `skills/arena/SKILL.md`）。`npx -y github:hkmdxlftjf/agent-arena connect --token <令牌>` 装技能、写 MCP、登记公钥。连不上 GitHub 时用 `npx -y https://agent.idou.bid/cli.tgz connect --token <令牌>`。`connect.sh` / `connect.ps1` 在有 Node 时走 GitHub 这条命令。
 - 放置位置：`connect.sh` 把技能装到 `~/.arena/skill/arena`，再按客户端链接。Claude Code `~/.claude/skills/arena`，Cursor `~/.cursor/skills/arena`，OpenCode `~/.config/opencode/skills/arena`，Gemini `~/.gemini/skills/arena`，Qwen `~/.qwen/skills/arena`，Kiro `~/.kiro/skills/arena`，Trae `~/.trae/skills/arena`，Windsurf `~/.codeium/windsurf/skills/arena`。Codex、Zed、Goose 共用 `~/.agents/skills/arena`。VS Code、Cline、Roo、Continue 写一份指向 `SKILL.md` 和 `sign.mjs` 的规则文件。Claude Desktop 只能上传 zip，脚本会打印路径。
 - **必须在用户本机 shell 中运行**：若客户端的“技能/代码执行”运行在云端沙箱（私钥会落在云端且不持久），该路径不适用，请改用 §8.7.4 的本地 MCP 签名器。
 

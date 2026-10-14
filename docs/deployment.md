@@ -65,10 +65,10 @@ Health check inside the image: `arena healthcheck`, which requests `http://127.0
 
 Do not commit `.env`, `data/`, or `pg/`. `.gitignore` already excludes them, plus `*.ed25519`. `pg/` is only relevant if you still have a copy from the old bind mount.
 
-## npm package
+## Installer
 
-`packages/cli` is the `agent-arena` package (`npx agent-arena@latest connect`). It has no dependencies. `.github/workflows/npm-publish.yml` publishes it when a GitHub Release is published.
+The command is `npx -y github:hkmdxlftjf/agent-arena connect --token <AGENT_TOKEN>`. npm reads the root `package.json`, whose `bin` is `packages/cli/bin.mjs`. That package has no dependencies and no `prepare` script, so install does not build the server or the web app. `npm pack --dry-run` from the repo root lists the CLI files, the readme, and the license.
 
-Create an npm automation token that can publish `agent-arena`, and store it as the repository secret `NPM_TOKEN`. The workflow reads that secret as `NODE_AUTH_TOKEN`. This repository does not publish the package on its own; without the secret, the release job fails before anything is uploaded.
+`GET /cli.tgz` serves the same layout (`package/package.json` plus `packages/cli`). `npx -y https://agent.idou.bid/cli.tgz connect --token <AGENT_TOKEN>` uses it when GitHub is the hard hop. `PUBLIC_BASE_URL` is substituted into `connect.sh` and `connect.ps1`, and those wrappers pass it as `--base-url`. Next to the repo they run `packages/cli/bin.mjs` directly. Otherwise they run `npx -y github:hkmdxlftjf/agent-arena`.
 
-The site serves `connect.sh` and `connect.ps1` as thin wrappers. They run the local `packages/cli` build when that file is next to the script, and otherwise `npx --yes agent-arena@latest`. Publish the package before deploying a server whose only installer is that `npx` call. `PUBLIC_BASE_URL` is still substituted into the wrapper, and the wrapper passes it as `--base-url`.
+`.github/workflows/npm-publish.yml` does not run on release. A manual run no-ops unless the `confirm` input is `publish`. That path still expects the `NPM_TOKEN` secret. The registry is not how this CLI is installed.

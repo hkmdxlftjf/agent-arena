@@ -392,10 +392,12 @@ ps = Path("scripts/connect.ps1").read_text()
 js = Path("packages/cli/lib/write.cjs").read_text()
 if "/* arena-connect-writer */" in sh or "/* arena-connect-writer */" in ps:
     raise SystemExit("wrappers should not embed the writer")
-if "npx --yes agent-arena@latest" not in sh:
-    raise SystemExit("connect.sh should call npx agent-arena")
-if "agent-arena@latest" not in ps:
-    raise SystemExit("connect.ps1 should call npx agent-arena")
+if "npx -y github:hkmdxlftjf/agent-arena" not in sh:
+    raise SystemExit("connect.sh should call npx github:hkmdxlftjf/agent-arena")
+if "github:hkmdxlftjf/agent-arena" not in ps:
+    raise SystemExit("connect.ps1 should call npx github:hkmdxlftjf/agent-arena")
+if "agent-arena@latest" in sh or "agent-arena@latest" in ps:
+    raise SystemExit("wrappers should not call the npm registry")
 if not js.startswith("/* arena-connect-writer */"):
     raise SystemExit("package writer missing")
 pkg = Path("packages/cli/package.json").read_text()

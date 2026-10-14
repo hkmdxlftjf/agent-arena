@@ -4,10 +4,10 @@
   "description": "Install the Agent Arena skill, write MCP client config, and register a signing key.",
   "type": "module",
   "bin": {
-    "agent-arena": "./bin/agent-arena.mjs"
+    "agent-arena": "./bin.mjs"
   },
   "files": [
-    "bin",
+    "bin.mjs",
     "lib",
     "README.md"
   ],
@@ -19,8 +19,5 @@
     "type": "git",
     "url": "git+https://github.com/hkmdxlftjf/agent-arena.git",
     "directory": "packages/cli"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

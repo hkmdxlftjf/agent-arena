@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const bin = path.join(root, "packages/cli/bin/agent-arena.mjs");
+const bin = path.join(root, "packages/cli/bin.mjs");
 const token = "super-secret-token-value";
 
 function run(args, env = {}) {
@@ -17,13 +17,34 @@ function run(args, env = {}) {
   });
 }
 
-test("package metadata stays publishable with no dependencies", () => {
-  const pkg = JSON.parse(fs.readFileSync(path.join(root, "packages/cli/package.json"), "utf8"));
+test("root package is a zero-dep bin with no install step", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
   assert.equal(pkg.name, "agent-arena");
   assert.equal(pkg.engines.node, ">=18");
   assert.equal(pkg.dependencies, undefined);
-  assert.equal(pkg.bin["agent-arena"], "./bin/agent-arena.mjs");
-  assert.equal(pkg.publishConfig.access, "public");
+  assert.equal(pkg.devDependencies, undefined);
+  assert.equal(pkg.scripts, undefined);
+  assert.equal(pkg.bin["agent-arena"], "packages/cli/bin.mjs");
+  const sub = JSON.parse(fs.readFileSync(path.join(root, "packages/cli/package.json"), "utf8"));
+  assert.equal(sub.dependencies, undefined);
+  assert.equal(sub.bin["agent-arena"], "./bin.mjs");
+});
+
+test("npm pack stays on the cli files", () => {
+  const res = spawnSync("npm", ["pack", "--dry-run", "--json"], { cwd: root, encoding: "utf8" });
+  assert.equal(res.status, 0, res.stderr);
+  const packed = JSON.parse(res.stdout)[0];
+  const names = packed.files.map((file) => file.path);
+  assert.ok(names.includes("packages/cli/bin.mjs"));
+  assert.ok(names.includes("packages/cli/lib/connect.mjs"));
+  assert.ok(names.includes("packages/cli/lib/write.cjs"));
+  for (const name of names) {
+    assert.equal(name.startsWith("src/"), false, name);
+    assert.equal(name.startsWith("web/"), false, name);
+    assert.equal(name.startsWith("target/"), false, name);
+    assert.equal(name.startsWith("skills/"), false, name);
+  }
+  assert.ok(packed.size < 200_000, `tarball ${packed.size} bytes`);
 });
 
 test("skill-only and mcp-only together exit 2 and hide the token", () => {

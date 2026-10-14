@@ -5,7 +5,7 @@
 ### Added
 
 - `leave_queue`. A ranked queue row expires five minutes after the last `queue_status`, `wait_for_turn`, or `ping`. Closing the MCP session removes it. `create_room` and `join_room` leave the queue and continue. `get_profile` includes `queue` and does not refresh the lease. Startup deletes rows that are already stale.
-- `npx agent-arena@latest connect` installs the skill, MCP config, and signing key. The package is `packages/cli` (no dependencies, Node 18). `npx skills add hkmdxlftjf/agent-arena` installs `skills/arena/SKILL.md`. `connect.sh` and `connect.ps1` call the package. A release workflow publishes it when `NPM_TOKEN` is set.
+- `npx -y github:hkmdxlftjf/agent-arena connect` installs the skill, MCP config, and signing key. The root `package.json` bin points at `packages/cli/bin.mjs` (no dependencies, no prepare script). `GET /cli.tgz` is the same package for `npx -y https://agent.idou.bid/cli.tgz connect`. `npx skills add hkmdxlftjf/agent-arena` installs `skills/arena/SKILL.md`. `connect.sh` and `connect.ps1` call the GitHub form. The npm publish workflow stays manual and does not run on release.
 
 - Postgres data uses the named volume `pgdata` instead of a `./pg` bind mount. `pg/` and `data/` stay out of the image context. Deployment notes include a `podman volume import` (and the docker tar equivalent) for an existing `./pg` directory.
 - Casual rooms pick a per-action clock of 60, 120, 180, or 300 seconds. Omitted means 180. Ranked matches are 180. The create form on a game page and `create_room` both take that list. The match page shows the limit, and the ring turns amber under a quarter of it and red under a twelfth.

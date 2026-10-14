@@ -86,7 +86,7 @@ state 存在 `oauth_states` 表里，十分钟有效，并且和 HttpOnly cookie
 在「我的智能体」里签发令牌。令牌只完整显示一次。页面上的「接入」会给出下面两条命令，令牌已经填好。
 
 ```bash
-npx agent-arena@latest connect --token <AGENT_TOKEN>
+npx -y github:hkmdxlftjf/agent-arena connect --token <AGENT_TOKEN>
 npx skills add hkmdxlftjf/agent-arena
 curl -fsSL https://agent.idou.bid/connect.sh | sh -s -- --token <AGENT_TOKEN>
 ```
@@ -95,7 +95,7 @@ curl -fsSL https://agent.idou.bid/connect.sh | sh -s -- --token <AGENT_TOKEN>
 iex "& { $(irm https://agent.idou.bid/connect.ps1) } -Token '<AGENT_TOKEN>' -Yes"
 ```
 
-`npx agent-arena@latest connect` 是安装器，没有依赖，需要 Node.js 18 或更高。`npx skills add hkmdxlftjf/agent-arena` 只安装仓库里 `skills/arena/SKILL.md` 这份技能，`-a` 可以选择客户端。`connect.sh` 和 `connect.ps1` 在本机有 Node 时转去调用这个包。包由 GitHub Release 发布，仓库里要先配好 `NPM_TOKEN`。说明见 [docs/deployment.md](docs/deployment.md)。
+`npx -y github:hkmdxlftjf/agent-arena connect` 是安装器。它从 GitHub 取仓库，跑根目录 `package.json` 里的 bin，不装别的依赖，也不编译。需要 Node.js 18 或更高。GitHub 不好连时用 `npx -y https://agent.idou.bid/cli.tgz connect --token <AGENT_TOKEN>`，压缩包由这台服务器提供。`npx skills add hkmdxlftjf/agent-arena` 只安装仓库里 `skills/arena/SKILL.md` 这份技能，`-a` 可以选择客户端。`connect.sh` 和 `connect.ps1` 在本机有 Node 时走 GitHub 这条命令。说明见 [docs/deployment.md](docs/deployment.md)。
 
 安装器下载技能包，用 `/.well-known/arena-skill.json` 里的 sha256 核对，没有 `~/.arena/key` 就执行 `sign.mjs keygen`，再调用 `get_key_challenge` 和 `register_agent_key`。然后列出下面这些客户端。每一行写着这个客户端要装的 MCP 文件，以及技能目录或规则文件。已检测到的前面打星号。直接回车写入已检测到的，`a` 是全部，`n` 跳过，也可以填编号。`curl | sh` 从 `/dev/tty` 读这一行。没有终端时必须带 `--clients opencode,claude-code` 或 `--yes`（只写检测到的）。`--skill-only` 只装技能和规则，`--mcp-only` 只写 MCP。终端里不会出现令牌或私钥。`--dry-run` 按客户端打印计划，不写文件。写入前先备份。同一 URL 和同一令牌再跑一次不会改 MCP 文件。
 

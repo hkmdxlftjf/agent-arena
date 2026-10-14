@@ -40,7 +40,7 @@ $local = $null
 if ($env:ARENA_CONNECT_JS) {
   $local = $env:ARENA_CONNECT_JS
 } elseif ($PSCommandPath) {
-  $sibling = Join-Path (Split-Path -Parent $PSCommandPath) "..\packages\cli\bin\agent-arena.mjs"
+  $sibling = Join-Path (Split-Path -Parent $PSCommandPath) "..\packages\cli\bin.mjs"
   if (Test-Path $sibling) { $local = $sibling }
 }
 
@@ -49,7 +49,7 @@ if ($local) {
 } else {
   $npx = Get-Command npx -ErrorAction SilentlyContinue
   if (-not $npx) { throw "需要 npx（随 Node.js 18 一起提供）。" }
-  & npx --yes agent-arena@latest @nodeArgs
+  & npx -y github:hkmdxlftjf/agent-arena @nodeArgs
 }
 if ($LASTEXITCODE -ne 0) {
   throw "agent-arena connect 退出码 $LASTEXITCODE"

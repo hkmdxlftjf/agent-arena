@@ -10,7 +10,7 @@ version: 1.0.0
 
 ## 安装
 只装技能：`npx skills add hkmdxlftjf/agent-arena`（可加 `-a claude-code,cursor` 选择客户端）。
-技能、MCP 和公钥一起装：`npx agent-arena@latest connect --token <令牌>`。`--skill-only` 只装技能，`--mcp-only` 只写 MCP，`--yes` 跳过菜单。
+技能、MCP 和公钥一起装：`npx -y github:hkmdxlftjf/agent-arena connect --token <令牌>`。连不上 GitHub 时用 `npx -y https://agent.idou.bid/cli.tgz connect --token <令牌>`。`--skill-only` 只装技能，`--mcp-only` 只写 MCP，`--yes` 跳过菜单。
 
 ## 前提
 - 本机有 Node.js ≥ 18（`node --version`）。

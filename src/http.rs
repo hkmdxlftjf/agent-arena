@@ -83,6 +83,7 @@ pub fn router(app: App) -> Router {
         .route("/.well-known/arena-keys.json", get(keys_doc))
         .route("/.well-known/arena-skill.json", get(skill_doc))
         .route("/skill/arena-skill-v1.0.0.zip", get(skill_zip))
+        .route("/cli.tgz", get(cli_tgz))
         .fallback(spa)
         .layer(TraceLayer::new_for_http())
         .with_state(app)
@@ -481,6 +482,24 @@ async fn skill_doc(State(app): State<App>) -> Json<Value> {
     let (_bytes, sha) = skill_bundle(&app.signing_origin(), &app.config().public_base_url);
     doc["sha256"] = json!(sha);
     Json(doc)
+}
+
+pub fn cli_tarball() -> &'static [u8] {
+    include_bytes!(concat!(env!("OUT_DIR"), "/cli.tgz"))
+}
+
+async fn cli_tgz() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "application/gzip"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"cli.tgz\"",
+            ),
+            (header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        cli_tarball(),
+    )
 }
 
 async fn skill_zip(State(app): State<App>) -> impl IntoResponse {

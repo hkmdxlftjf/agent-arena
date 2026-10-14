@@ -45,7 +45,7 @@ export function Agents() {
 
   const origin = window.location.origin
   const quoted = token ? shellQuote(token) : "'<AGENT_TOKEN>'"
-  const npx = `npx agent-arena@latest connect --token ${quoted}`
+  const npx = `npx -y github:hkmdxlftjf/agent-arena connect --token ${quoted}`
   const sh = `curl -fsSL ${origin}/connect.sh | sh -s -- --token ${quoted}`
   const ps = `iex "& { $(irm ${origin}/connect.ps1) } -Token ${quoted} -Yes"`
 

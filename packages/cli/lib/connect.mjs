@@ -63,7 +63,7 @@ function fail(message, code) {
 
 function usage() {
   return fail(
-    `用法: npx agent-arena@latest connect --token <AGENT_TOKEN> [--yes] [--clients claude-code,cursor] [--skill-only] [--mcp-only] [--dry-run]`,
+    "用法: npx -y github:hkmdxlftjf/agent-arena connect --token <AGENT_TOKEN> [--yes] [--clients claude-code,cursor] [--skill-only] [--mcp-only] [--dry-run]",
     2,
   );
 }

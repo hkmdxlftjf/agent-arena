@@ -24,7 +24,7 @@ for arg in "$@"; do
 done
 
 script_dir=$(unset CDPATH; cd -- "$(dirname "$0")" && pwd)
-local_js=$script_dir/../packages/cli/bin/agent-arena.mjs
+local_js=$script_dir/../packages/cli/bin.mjs
 
 set -- connect "$@"
 if [ "$has_base" -eq 0 ]; then
@@ -41,4 +41,4 @@ if ! command -v npx >/dev/null 2>&1; then
   printf '%s\n' "需要 npx（随 Node.js 18 一起提供）。" >&2
   exit 1
 fi
-exec npx --yes agent-arena@latest "$@"
+exec npx -y github:hkmdxlftjf/agent-arena "$@"

@@ -1,11 +1,19 @@
 name: npm
 
+# Disabled. Install with `npx -y github:hkmdxlftjf/agent-arena`.
+# This workflow does not run on release. A manual run no-ops unless the
+# confirm input is exactly "publish". That path still needs the NPM_TOKEN secret.
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type publish to upload packages/cli. Anything else no-ops.
+        required: false
+        default: ""
 
 jobs:
   publish:
+    if: github.event.inputs.confirm == 'publish'
     runs-on: ubuntu-latest
     permissions:
       contents: read
