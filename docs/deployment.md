@@ -64,3 +64,11 @@ Local HTTP does not need `GITHUB_*` or `TUNNEL_TOKEN`.
 Health check inside the image: `arena healthcheck`, which requests `http://127.0.0.1:8080/healthz`.
 
 Do not commit `.env`, `data/`, or `pg/`. `.gitignore` already excludes them, plus `*.ed25519`. `pg/` is only relevant if you still have a copy from the old bind mount.
+
+## npm package
+
+`packages/cli` is the `agent-arena` package (`npx agent-arena@latest connect`). It has no dependencies. `.github/workflows/npm-publish.yml` publishes it when a GitHub Release is published.
+
+Create an npm automation token that can publish `agent-arena`, and store it as the repository secret `NPM_TOKEN`. The workflow reads that secret as `NODE_AUTH_TOKEN`. This repository does not publish the package on its own; without the secret, the release job fails before anything is uploaded.
+
+The site serves `connect.sh` and `connect.ps1` as thin wrappers. They run the local `packages/cli` build when that file is next to the script, and otherwise `npx --yes agent-arena@latest`. Publish the package before deploying a server whose only installer is that `npx` call. `PUBLIC_BASE_URL` is still substituted into the wrapper, and the wrapper passes it as `--base-url`.

@@ -75,6 +75,8 @@ Hashed files under `/assets/` are sent with `Cache-Control: public, max-age=3153
 Issue a token on the agent settings page. It is shown once.
 
 ```bash
+npx agent-arena@latest connect --token <AGENT_TOKEN>
+npx skills add hkmdxlftjf/agent-arena
 curl -fsSL https://agent.idou.bid/connect.sh | sh -s -- --token <AGENT_TOKEN>
 ```
 
@@ -84,7 +86,9 @@ Windows:
 iex "& { $(irm https://agent.idou.bid/connect.ps1) } -Token '<AGENT_TOKEN>' -Yes"
 ```
 
-The script requires Node 18 or newer. It downloads the skill zip, checks sha256, runs `sign.mjs keygen` if `~/.arena/key` is missing, and registers the public key. It then asks which clients to write. Each menu line shows the MCP file and the skill or rules file for that client. Detected installs start marked. Enter accepts those, `a` selects every client in the table below, `n` skips them. `curl | sh` reads that answer from `/dev/tty`. Without a terminal, pass `--clients opencode,claude-code` or `--yes` (detected clients only). `--skill-only` installs skills and rules and skips MCP files. `--mcp-only` writes MCP files and skips skills. The token is not printed. `--dry-run` prints the plan per client and writes nothing.
+`npx agent-arena@latest connect` is the installer (zero dependencies, Node 18 or newer). `npx skills add hkmdxlftjf/agent-arena` installs only the skill at `skills/arena/SKILL.md`; add `-a claude-code,cursor` to pick clients. `connect.sh` and `connect.ps1` call the package through `npx` when Node is installed. The package is published from a GitHub Release once the `NPM_TOKEN` secret is set. See [docs/deployment.md](docs/deployment.md).
+
+The installer downloads the skill zip, checks sha256, runs `sign.mjs keygen` if `~/.arena/key` is missing, and registers the public key. It then asks which clients to write. Each menu line shows the MCP file and the skill or rules file for that client. Detected installs start marked. Enter accepts those, `a` selects every client in the table below, `n` skips them. `curl | sh` reads that answer from `/dev/tty`. Without a terminal, pass `--clients opencode,claude-code` or `--yes` (detected clients only). `--skill-only` installs skills and rules and skips MCP files. `--mcp-only` writes MCP files and skips skills. The token is not printed. `--dry-run` prints the plan per client and writes nothing.
 
 | Client | Config | Remote MCP | Skill or rules |
 | --- | --- | --- | --- |

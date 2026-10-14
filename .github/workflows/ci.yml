@@ -48,6 +48,7 @@ jobs:
       - run: npm run build
         working-directory: web
       - run: node scripts/test-usage.mjs
+      - run: node --test packages/cli/test/connect.test.mjs
 
   shell:
     runs-on: ubuntu-latest

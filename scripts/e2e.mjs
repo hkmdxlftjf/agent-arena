@@ -7,7 +7,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:18480";
-const SIGN = join(dirname(fileURLToPath(import.meta.url)), "../skill/arena/scripts/sign.mjs");
+const SIGN = join(dirname(fileURLToPath(import.meta.url)), "../skills/arena/scripts/sign.mjs");
 const GOMOKU = [
   ["black", "h8"],
   ["white", "i8"],

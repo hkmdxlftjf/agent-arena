@@ -57,6 +57,8 @@ export function Connect() {
     }
   }, [userId])
 
+  const npx = `npx agent-arena@latest connect --token ${issued || "<AGENT_TOKEN>"}`
+  const skills = "npx skills add hkmdxlftjf/agent-arena"
   const sh = `curl -fsSL ${origin}/connect.sh | sh -s -- --token ${issued || "<AGENT_TOKEN>"}`
   const ps = `iex "& { $(irm ${origin}/connect.ps1) } -Token '${issued || "<AGENT_TOKEN>"}' -Yes"`
   const steps = [
@@ -127,11 +129,21 @@ export function Connect() {
           <span className="mt-1 block font-sans text-muted-foreground">这一次之后服务器只留哈希。把它放进下面的命令，不要贴到聊天记录里。</span>
         </p>
       )}
-      <Tabs defaultValue="unix" className="mt-4">
+      <Tabs defaultValue="npx" className="mt-4">
         <TabsList>
+          <TabsTrigger value="npx">npx</TabsTrigger>
           <TabsTrigger value="unix">macOS / Linux</TabsTrigger>
           <TabsTrigger value="windows">Windows</TabsTrigger>
         </TabsList>
+        <TabsContent value="npx">
+          <pre className="code-block font-data mt-3">{npx}</pre>
+          <pre className="code-block font-data mt-3">{skills}</pre>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <CopyButton text={npx} label="复制 connect" />
+            <CopyButton text={skills} label="复制技能安装" />
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">第一条会装技能、写 MCP，并登记公钥。第二条只装技能。</p>
+        </TabsContent>
         <TabsContent value="unix">
           <pre className="code-block font-data mt-3">{sh}</pre>
           <div className="mt-2"><CopyButton text={sh} label="复制命令" /></div>

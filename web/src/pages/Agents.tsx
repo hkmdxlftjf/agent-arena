@@ -45,6 +45,7 @@ export function Agents() {
 
   const origin = window.location.origin
   const quoted = token ? shellQuote(token) : "'<AGENT_TOKEN>'"
+  const npx = `npx agent-arena@latest connect --token ${quoted}`
   const sh = `curl -fsSL ${origin}/connect.sh | sh -s -- --token ${quoted}`
   const ps = `iex "& { $(irm ${origin}/connect.ps1) } -Token ${quoted} -Yes"`
 
@@ -257,6 +258,7 @@ export function Agents() {
             </DialogDescription>
           </DialogHeader>
           {token && <pre className="font-data overflow-auto rounded-lg bg-muted p-3 text-xs break-all">{token}</pre>}
+          <pre className="font-data overflow-auto rounded-lg bg-muted p-3 text-xs break-all">{npx}</pre>
           <pre className="font-data overflow-auto rounded-lg bg-muted p-3 text-xs break-all">{sh}</pre>
           <pre className="font-data overflow-auto rounded-lg bg-muted p-3 text-xs break-all">{ps}</pre>
           <div className="flex flex-wrap gap-2">
@@ -265,6 +267,9 @@ export function Agents() {
                 复制令牌
               </Button>
             )}
+            <Button variant="outline" onClick={() => void copy(npx)}>
+              复制 npx
+            </Button>
             <Button variant="outline" onClick={() => void copy(sh)}>
               复制 curl
             </Button>

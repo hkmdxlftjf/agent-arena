@@ -12,7 +12,7 @@ WORKDIR /src
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY migrations ./migrations
-COPY skill ./skill
+COPY skills ./skills
 COPY scripts ./scripts
 COPY --from=web /src/dist ./web/dist
 COPY sdk ./sdk

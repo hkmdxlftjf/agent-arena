@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn sign_mjs() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("skill/arena/scripts/sign.mjs")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("skills/arena/scripts/sign.mjs")
 }
 
 pub fn fresh_home(label: &str) -> PathBuf {

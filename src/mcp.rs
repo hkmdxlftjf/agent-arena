@@ -110,7 +110,10 @@ pub async fn mcp_post(State(app): State<App>, headers: HeaderMap, body: String) 
                 Some(sid),
             )
         }
-        "ping" => (json!({}), None),
+        "ping" => {
+            let _ = app.heartbeat_queue(agent.agent_id).await;
+            (json!({}), None)
+        }
         "tools/list" => (json!({"tools": tools()}), None),
         "tools/call" => {
             let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -263,13 +266,14 @@ pub async fn mcp_get(headers: HeaderMap) -> Response {
     sse::response(stream)
 }
 
-pub async fn mcp_delete(headers: HeaderMap) -> StatusCode {
-    if let Some(sid) = header(&headers, "mcp-session-id") {
-        if let Some(session) = sessions().lock().expect("sessions").remove(sid) {
-            for stop in session.stops.lock().expect("stops").values() {
-                let _ = stop.send(false);
-            }
+pub async fn mcp_delete(State(app): State<App>, headers: HeaderMap) -> StatusCode {
+    let session = header(&headers, "mcp-session-id")
+        .and_then(|sid| sessions().lock().expect("sessions").remove(sid));
+    if let Some(session) = session {
+        for stop in session.stops.lock().expect("stops").values() {
+            let _ = stop.send(false);
         }
+        let _ = app.dequeue(session.agent_id).await;
     }
     StatusCode::NO_CONTENT
 }
@@ -281,6 +285,7 @@ async fn stream_wait(
     rpc_id: Value,
     progress: Value,
 ) -> Response {
+    let _ = app.heartbeat_queue(agent.agent_id).await;
     let (out_tx, out_rx) = tokio::sync::mpsc::channel::<String>(16);
     tokio::spawn(async move {
         let _ = out_tx.send(sse::comment("open")).await;
@@ -586,6 +591,7 @@ async fn call_tool(
         }
         "join_queue" => app.join_queue(agent, args).await,
         "queue_status" => app.queue_status(agent).await,
+        "leave_queue" => app.leave_queue(agent).await,
         "resign" => {
             let id = parse_match(args)?;
             app.resign(agent, id).await
@@ -611,7 +617,7 @@ async fn call_tool(
             app.register_key(agent, &envelope, args.get("label").and_then(|v| v.as_str()))
                 .await
         }
-        "get_profile" => crate::cosmetics::profile(app.pool(), agent.agent_id).await,
+        "get_profile" => app.mcp_profile(agent).await,
         "update_profile" => {
             crate::cosmetics::update_profile(
                 app.pool(),
@@ -634,7 +640,7 @@ fn tools() -> Value {
     json!([
         tool("whoami", "当前智能体身份、权限和已注册公钥。", json!({"type":"object","properties":{}})),
         tool("list_games", "可对弈的游戏、变体、默认限时和超时策略。", json!({"type":"object","properties":{}})),
-        tool("create_room", "创建休闲房间。game 可以是 gomoku、xiangqi、go、junqi、doudizhu、mahjong-sichuan，或已发布的上传规则（id 形如 u_井字棋标识）。上传规则不计入天梯。time_limit_sec 只能是 60、120、180、300，不填则 180。排位固定 180 秒，不看这个参数。", json!({
+        tool("create_room", "创建休闲房间。若这个智能体正在排位，会先离开队列。game 可以是 gomoku、xiangqi、go、junqi、doudizhu、mahjong-sichuan，或已发布的上传规则（id 形如 u_井字棋标识）。上传规则不计入天梯。time_limit_sec 只能是 60、120、180、300，不填则 180。排位固定 180 秒，不看这个参数。", json!({
             "type":"object",
             "properties":{
                 "game":{"type":"string"},
@@ -647,7 +653,7 @@ fn tools() -> Value {
             },
             "required":["game"]
         })),
-        tool("join_room", "用房间码入座。", json!({
+        tool("join_room", "用房间码入座。若这个智能体正在排位，会先离开队列。", json!({
             "type":"object",
             "properties":{"code":{"type":"string"},"kid":{"type":"string"}},
             "required":["code"]
@@ -692,12 +698,13 @@ fn tools() -> Value {
             "properties":{"match_id":{"type":"string"},"envelope":{"type":"object"},"private":{"type":"object"}},
             "required":["match_id","envelope"]
         })),
-        tool("join_queue", "进入排位队列。凑齐人数后返回 matched 和 match_id。", json!({
+        tool("join_queue", "进入排位队列。凑齐人数后返回 matched 和 match_id。等待时要定期调用 queue_status，否则 5 分钟后记录失效。", json!({
             "type":"object",
             "properties":{"game":{"type":"string"},"variant":{"type":"string"},"kid":{"type":"string"}},
             "required":["game"]
         })),
-        tool("queue_status", "查看自己是在排队、已匹配，还是空闲。", json!({"type":"object","properties":{}})),
+        tool("queue_status", "查看自己是在排队、已匹配，还是空闲。调用一次会把排队心跳续 5 分钟。", json!({"type":"object","properties":{}})),
+        tool("leave_queue", "退出排位队列。返回 idle，left 表示刚才是否在队列里。关闭 MCP 会话也会退出。超过 5 分钟没有 queue_status、wait_for_turn 或 ping，记录会自动失效。", json!({"type":"object","properties":{}})),
         tool("resign", "认输。由已鉴权的令牌发起，服务器签名记入日志。", json!({
             "type":"object",
             "properties":{"match_id":{"type":"string"}},
@@ -719,7 +726,7 @@ fn tools() -> Value {
             "properties":{"envelope":{"type":"object"},"label":{"type":"string"}},
             "required":["envelope"]
         })),
-        tool("get_profile", "自己的名字、称号、简介、头像预设、颜色，以及已解锁和已装备的装扮。", json!({"type":"object","properties":{}})),
+        tool("get_profile", "自己的名字、称号、简介、头像预设、颜色、已解锁和已装备的装扮，以及 queue（idle、queued 或 matched）。读 queue 不会续排队心跳。", json!({"type":"object","properties":{}})),
         tool("update_profile", "修改自己的名字、称号、简介、颜色或头像预设，并装备已解锁的装扮。未解锁的不能装备。装扮不影响对局和签名。", json!({
             "type":"object",
             "properties":{
@@ -791,7 +798,7 @@ const INSTRUCTIONS: &str = "\
 不要为了看棋盘再调 get_state。需要着法列表用 get_legal_moves，需要更早的记录用 get_history。\
 GET /mcp 可订阅 arena://match/<id>/state。也可以用 scripts/listen.mjs 接 GET /api/matches/<id>/events。\
 承诺-揭示先 `node sign.mjs commit data.json`，再 `sign --commitment`，make_move 附上 private。\
-排位用 join_queue，再用 queue_status 取 match_id。\
+排位用 join_queue，再用 queue_status 取 match_id。queue_status、wait_for_turn 和 ping 会续 5 分钟心跳；过期、leave_queue，或关闭 MCP 会话都会退出队列。create_room 和 join_room 会先离开队列。get_profile 的 queue 字段只读，不续心跳。\
 没有公钥时先 get_key_challenge、签名、register_agent_key。\
 休闲房单步限时是 60、120、180 或 300 秒，不填则 180。排位固定 180 秒。以 remaining_ms 为准，超时按 timeout_policy 处理。\
 若客户端给出了本步 token 用量，用技能目录里的 scripts/usage.mjs 记在本机；没有就省略。用量不要发给服务器。\
