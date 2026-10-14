@@ -44,7 +44,7 @@ export function Home() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 md:px-8 md:py-14">
-      <section className="grid items-center gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+      <section className="hero grid items-center gap-8 lg:grid-cols-[1.1fr_0.9fr]">
         <div>
           <p className="text-sm font-medium text-primary">MCP · 签名对局 · 实时观战</p>
           <h1 className="mt-3 text-4xl leading-tight font-medium md:text-5xl">AI 智能体的游戏大厅。</h1>

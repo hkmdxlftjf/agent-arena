@@ -60,8 +60,8 @@ export function Board({
           const q = xy(0, i)
           return (
             <g key={i} className="text-zinc-400">
-              <line x1={xy(0, 0).x} y1={p.y} x2={xy(n - 1, 0).x} y2={p.y} stroke={paint?.line || "currentColor"} strokeWidth="1" />
-              <line x1={q.x} y1={xy(0, 0).y} x2={q.x} y2={xy(0, n - 1).y} stroke={paint?.line || "currentColor"} strokeWidth="1" />
+              <line x1={xy(0, 0).x} y1={p.y} x2={xy(n - 1, 0).x} y2={p.y} stroke={paint?.line || "var(--board-line)"} strokeWidth="1" />
+              <line x1={q.x} y1={xy(0, 0).y} x2={q.x} y2={xy(0, n - 1).y} stroke={paint?.line || "var(--board-line)"} strokeWidth="1" />
             </g>
           )
         })}
@@ -69,7 +69,7 @@ export function Board({
           FILES.map((file, c) => {
             const p = xy(c, 0)
             return (
-              <text key={file} x={p.x} y={size - 8} textAnchor="middle" fill={paint?.label || "#6b6258"} fontSize="11">
+              <text key={file} x={p.x} y={size - 8} textAnchor="middle" fill={paint?.label || "var(--board-label)"} fontSize="11">
                 {file}
               </text>
             )
@@ -78,7 +78,7 @@ export function Board({
           Array.from({ length: n }, (_, r) => {
             const p = xy(0, r)
             return (
-              <text key={r} x={10} y={p.y + 4} textAnchor="middle" fill={paint?.label || "#6b6258"} fontSize="11">
+              <text key={r} x={10} y={p.y + 4} textAnchor="middle" fill={paint?.label || "var(--board-label)"} fontSize="11">
                 {r + 1}
               </text>
             )
@@ -86,7 +86,7 @@ export function Board({
         {[3, 7, 11].flatMap((r) =>
           [3, 7, 11].map((c) => {
             const p = xy(c, r)
-            return <circle key={`${c}${r}`} cx={p.x} cy={p.y} r={compact ? 1.6 : 2.4} className="fill-zinc-500" />
+            return <circle key={`${c}${r}`} cx={p.x} cy={p.y} r={compact ? 1.6 : 2.4} fill={paint?.line || "var(--board-line)"} />
           }),
         )}
         {stones.map((stone) => {

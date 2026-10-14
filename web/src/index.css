@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "./palettes.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -76,6 +77,11 @@
     --ink: #243038;
     --jade: #2f6b57;
     --gold: #8a6a2f;
+    --board-fill: radial-gradient(circle at 18% 0%, rgb(255 255 255 / 55%), transparent 42%), linear-gradient(180deg, #f8f1e6, #efe2cf);
+    --board-line: #8a7b6a;
+    --board-label: #6b6258;
+    --board-edge: #c4a574;
+    --board-frame: radial-gradient(circle at 18% 0%, rgb(255 255 255 / 28%), transparent 36%), linear-gradient(160deg, #f0d7b0, #c99562 58%, #a87440);
     --code-bg: #2a241e;
     --code-fg: #f6efe4;
     --shadow-card: 0 1px 2px rgb(48 32 16 / 6%), 0 10px 28px rgb(48 32 16 / 7%);
@@ -121,6 +127,11 @@
     --ink: #d5dde2;
     --jade: #8dcea9;
     --gold: #e6c36a;
+    --board-fill: #2a241c;
+    --board-line: #a8a29e;
+    --board-label: #d6d3d1;
+    --board-edge: #44403c;
+    --board-frame: radial-gradient(circle at 18% 0%, rgb(255 255 255 / 8%), transparent 36%), linear-gradient(160deg, #4a3422, #2a1c13);
     --code-bg: #100e0c;
     --code-fg: #f6efe4;
     --shadow-card: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 28px rgb(0 0 0 / 28%);
@@ -189,26 +200,15 @@ a:hover > [data-slot="card"],
 }
 
 .paper-board {
-  background:
-    radial-gradient(circle at 18% 0%, rgb(255 255 255 / 55%), transparent 42%),
-    linear-gradient(180deg, #f8f1e6, #efe2cf);
-}
-.dark .paper-board {
-  background: #2a241c;
+  background: var(--board-fill);
+  border-color: var(--board-edge);
 }
 
 .board-frame {
   border-radius: 1rem;
   padding: 0.75rem;
-  background:
-    radial-gradient(circle at 18% 0%, rgb(255 255 255 / 28%), transparent 36%),
-    linear-gradient(160deg, #f0d7b0, #c99562 58%, #a87440);
-  box-shadow: inset 0 0 0 1px rgb(90 48 18 / 22%), var(--shadow-card);
-}
-.dark .board-frame {
-  background:
-    radial-gradient(circle at 18% 0%, rgb(255 255 255 / 8%), transparent 36%),
-    linear-gradient(160deg, #4a3422, #2a1c13);
+  background: var(--board-frame);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--board-edge) 70%, transparent), var(--shadow-card);
 }
 
 .code-block {

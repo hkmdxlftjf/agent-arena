@@ -39,7 +39,7 @@ export function gomokuStone(asset: string | null | undefined, seat: number, them
     }
     return dark
       ? { fill: "#111111", stroke: "#111111", mark: "#ffffff" }
-      : { fill: "#ffffff", stroke: "#d4d4d8", mark: "#8f2d2a" }
+      : { fill: "#ffffff", stroke: "#d4d4d8", mark: "var(--primary)" }
   })()
   if (theme === "night" && dark) return { ...tone, stroke: "#e7e5e4" }
   return tone

@@ -1,0 +1,273 @@
+/*
+  Light-theme proposals. The default (no data-palette) stays the current theme.
+  Switch with ?theme=lichess|chess|linear|kaggle. Nothing here copies logos or assets.
+
+  lichess — lichess.org light theme, measured 2026-10-14, plus their published tokens
+  in ui/lib/css/theme (page #edebe9, text #4d4d4d, primary hsl(209 77% 46%) = #1b78d0,
+  good/secondary hsl(88 62% 37%) = #629924, bad #cc3333, Noto Sans, 4px corners, flat).
+  Board squares from the screenshot fall in #f0d9b5 / #b58863. Nav is uppercase text
+  with an underline, not a pill. Green buttons on the site use white type at about
+  3.4:1, so --live keeps #629924 and filled buttons use the blue primary, which clears AA.
+
+  chess — chess.com homepage, measured the same day. Chrome is dark #302e2b with
+  system-ui at 14px and 5px corners. The board on that page is light #e8e8d0 and
+  green #709050; the green controls sit near #81b64c (pixel bin #80b048) and #68a048.
+  This direction keeps those board and green values and lifts the page off the light
+  square so the UI is a light theme. Button label is #312e2b on #81b64c (5.6:1).
+  Their display face "Chess Sans" is not used.
+
+  linear — vercel.com light surface plus linear.app accent. Vercel measured
+  #fafafa, text #171717, muted #4d4d4d, hairline #ebebeb, 6px radius, Geist,
+  headings at weight 400 with tight tracking. Linear's marketing site is dark
+  (#08090a / #f7f8f8); the filled control sampled there is #5e6ad2, and that is
+  the accent here because white on it clears 4.7:1. Vercel's own blue #0072f5
+  with white is 4.4:1, so it is not the button fill. The hero wash is Linear's
+  glow turned down on Vercel's light page. Type is the Geist file already in the app.
+
+  kaggle — kaggle.com/game-arena and the Game Arena leaderboard. Page #fff,
+  text #202124, hairline #dadce0, Inter, headings at 700, material shadow, pill
+  buttons. The cyan in the screenshot bins to #20beff. Dark text on that cyan
+  clears 7.6:1. LMArena (arena.ai) stopped on a Cloudflare check, and Board Game
+  Arena did not finish rendering a lobby, so this direction follows Kaggle only.
+  Radix gray and Tailwind zinc/sky are the token names for the same steps, not a
+  separate look.
+*/
+
+html[data-palette] body {
+  background-image: none;
+  background-color: var(--background);
+}
+
+html[data-palette="lichess"] {
+  --background: #edebe9;
+  --foreground: #4d4d4d;
+  --card: #ffffff;
+  --card-foreground: #4d4d4d;
+  --popover: #ffffff;
+  --popover-foreground: #4d4d4d;
+  --primary: #1b78d0;
+  --primary-foreground: #ffffff;
+  --secondary: #f7f6f5;
+  --secondary-foreground: #4d4d4d;
+  --muted: #e7e5e4;
+  --muted-foreground: #5e5e5e;
+  --accent: #e7e5e4;
+  --accent-foreground: #4d4d4d;
+  --destructive: #cc3333;
+  --border: #d9d9d9;
+  --input: #d9d9d9;
+  --ring: #1b78d0;
+  --live: #3f6b28;
+  --warn: #b27a00;
+  --wood: #b58863;
+  --ink: #4d4d4d;
+  --jade: #629924;
+  --gold: #b27a00;
+  --board-fill: #f0d9b5;
+  --board-line: #b58863;
+  --board-label: #6a5538;
+  --board-edge: #b58863;
+  --board-frame: #edebe9;
+  --shadow-card: none;
+  --shadow-lift: 0 1px 0 #d9d9d9;
+  --radius: 4px;
+  --chart-1: #1b78d0;
+  --chart-2: #629924;
+  --chart-3: #b58863;
+  --chart-4: #4d4d4d;
+  --chart-5: #b27a00;
+  font-family: "Noto Sans", "Noto Sans SC", "PingFang SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+html[data-palette="chess"] {
+  --background: #f4f1e4;
+  --foreground: #312e2b;
+  --card: #fffdf8;
+  --card-foreground: #312e2b;
+  --popover: #fffdf8;
+  --popover-foreground: #312e2b;
+  --primary: #81b64c;
+  --primary-foreground: #312e2b;
+  --secondary: #e8e8d0;
+  --secondary-foreground: #312e2b;
+  --muted: #e7e4d6;
+  --muted-foreground: #5c564e;
+  --accent: #e8e8d0;
+  --accent-foreground: #312e2b;
+  --destructive: #9a3412;
+  --border: #d9d3c2;
+  --input: #d9d3c2;
+  --ring: #3f6b28;
+  --live: #3f6b28;
+  --warn: #8a5a00;
+  --wood: #709050;
+  --ink: #312e2b;
+  --jade: #3f6b28;
+  --gold: #81b64c;
+  --board-fill: #e8e8d0;
+  --board-line: #709050;
+  --board-label: #3f4a32;
+  --board-edge: #709050;
+  --board-frame: linear-gradient(180deg, #e8e8d0, #d5d6b8);
+  --shadow-card: 0 1px 2px rgb(48 46 43 / 8%);
+  --shadow-lift: 0 8px 18px rgb(48 46 43 / 12%);
+  --radius: 5px;
+  --chart-1: #81b64c;
+  --chart-2: #709050;
+  --chart-3: #312e2b;
+  --chart-4: #e8e8d0;
+  --chart-5: #3f6b28;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Helvetica, Arial, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+html[data-palette="linear"] {
+  --background: #fafafa;
+  --foreground: #171717;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+  --primary: #5e6ad2;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #171717;
+  --muted: #f4f4f5;
+  --muted-foreground: #4d4d4d;
+  --accent: #eef0fb;
+  --accent-foreground: #3c448f;
+  --destructive: #b42318;
+  --border: #ebebeb;
+  --input: #ebebeb;
+  --ring: #5e6ad2;
+  --live: #0f7a4b;
+  --warn: #8a5a00;
+  --wood: #d4d4d8;
+  --ink: #171717;
+  --jade: #0f7a4b;
+  --gold: #5e6ad2;
+  --board-fill: #f4f4f5;
+  --board-line: #a1a1aa;
+  --board-label: #52525b;
+  --board-edge: #e4e4e7;
+  --board-frame: #ffffff;
+  --shadow-card: 0 0 0 1px #ebebeb;
+  --shadow-lift: 0 8px 24px rgb(23 23 23 / 6%);
+  --radius: 6px;
+  --chart-1: #5e6ad2;
+  --chart-2: #171717;
+  --chart-3: #a1a1aa;
+  --chart-4: #0f7a4b;
+  --chart-5: #4d4d4d;
+  font-family: "Geist Variable", Inter, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+html[data-palette="kaggle"] {
+  --background: #ffffff;
+  --foreground: #202124;
+  --card: #ffffff;
+  --card-foreground: #202124;
+  --popover: #ffffff;
+  --popover-foreground: #202124;
+  --primary: #20beff;
+  --primary-foreground: #202124;
+  --secondary: #f8f9fa;
+  --secondary-foreground: #202124;
+  --muted: #f8f9fa;
+  --muted-foreground: #3c4848;
+  --accent: #e8f7fe;
+  --accent-foreground: #083044;
+  --destructive: #b3261e;
+  --border: #dadce0;
+  --input: #dadce0;
+  --ring: #0b6fa3;
+  --live: #0f7a4b;
+  --warn: #8a5a00;
+  --wood: #dadce0;
+  --ink: #202124;
+  --jade: #0f7a4b;
+  --gold: #20beff;
+  --board-fill: #f8f9fa;
+  --board-line: #9aa0a6;
+  --board-label: #3c4848;
+  --board-edge: #dadce0;
+  --board-frame: #ffffff;
+  --shadow-card: 0 1px 2px rgb(60 64 67 / 30%), 0 1px 3px 1px rgb(60 64 67 / 15%);
+  --shadow-lift: 0 4px 8px rgb(60 64 67 / 20%);
+  --radius: 8px;
+  --chart-1: #20beff;
+  --chart-2: #304868;
+  --chart-3: #202124;
+  --chart-4: #0f7a4b;
+  --chart-5: #9aa0a6;
+  font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+html[data-palette="lichess"] .nav-link,
+html[data-palette="chess"] .nav-link {
+  border-radius: var(--radius);
+  font-weight: 500;
+}
+
+html[data-palette="lichess"] .nav-link {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.8125rem;
+}
+
+html[data-palette="lichess"] .nav-link-active,
+html[data-palette="kaggle"] .nav-link-active {
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+
+html[data-palette="linear"] .nav-link-active {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+html[data-palette="lichess"] [data-slot="card"] {
+  box-shadow: none;
+  background: var(--card);
+}
+
+html[data-palette="kaggle"] [data-slot="button"] {
+  border-radius: 999px;
+}
+
+html[data-palette="linear"] h1 {
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+html[data-palette="kaggle"] h1 {
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+html[data-palette="chess"] h1 {
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+html[data-palette="lichess"] h1 {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+html[data-palette="linear"] .hero {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 0 0, rgb(94 106 210 / 12%), transparent 46%),
+    var(--card);
+  padding: 1.75rem;
+}
+
+html[data-palette="chess"] .hero {
+  border-radius: 5px;
+}
+
+html[data-palette="kaggle"] .hero {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.5rem;
+}

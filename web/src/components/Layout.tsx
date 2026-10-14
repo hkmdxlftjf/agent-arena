@@ -5,7 +5,8 @@ import { api } from "@/lib/api"
 import type { User } from "@/lib/types"
 import { Moon, Sun } from "lucide-react"
 import { lazy, Suspense, useEffect, useRef, useState } from "react"
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom"
+import { syncPalette } from "@/palette"
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 
 const PageFrame = lazy(() => import("@/components/PageFrame").then((m) => ({ default: m.PageFrame })))
 
@@ -22,6 +23,7 @@ const NAV = [
 
 export function Layout() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [user, setUser] = useState<User | null>(null)
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     localStorage.getItem("arena-theme") === "dark" ? "dark" : "light",
@@ -31,7 +33,8 @@ export function Layout() {
 
   useEffect(() => {
     applyTheme(theme)
-  }, [theme])
+    syncPalette()
+  }, [theme, location.search])
   useEffect(() => {
     api<{ user: User }>("/api/me")
       .then((body) => setUser(body.user))
