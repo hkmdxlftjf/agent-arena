@@ -173,6 +173,8 @@ pub struct Engine {
     events: broadcast::Sender<String>,
     notify: Arc<Notify>,
     started_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    room_wait_ms: i64,
     max_match_duration_ms: i64,
     slot: Arc<Slot>,
 }
@@ -197,6 +199,7 @@ struct MatchRow {
     result: Option<Value>,
     end_reason: Option<String>,
     started_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
     game_version_id: Uuid,
     game_version: String,
     game_name: String,
@@ -231,6 +234,7 @@ pub async fn spawn_room(
     id: Uuid,
     origin: String,
     max_match_duration_ms: i64,
+    room_wait_ms: i64,
 ) -> anyhow::Result<()> {
     let slot = hub.slot(id);
     let rx = {
@@ -249,6 +253,7 @@ pub async fn spawn_room(
         id,
         slot.clone(),
         max_match_duration_ms,
+        room_wait_ms,
     )
     .await
     {
@@ -276,8 +281,18 @@ impl Engine {
         id: Uuid,
         slot: Arc<Slot>,
         max_match_duration_ms: i64,
+        room_wait_ms: i64,
     ) -> anyhow::Result<Self> {
-        let mut engine = Self::read(pool, server, origin, id, slot, max_match_duration_ms).await?;
+        let mut engine = Self::read(
+            pool,
+            server,
+            origin,
+            id,
+            slot,
+            max_match_duration_ms,
+            room_wait_ms,
+        )
+        .await?;
         if engine.status == "running" && engine.chain.entries.is_empty() {
             engine.open_genesis().await?;
         }
@@ -305,6 +320,7 @@ impl Engine {
         server: ServerKey,
         origin: String,
         id: Uuid,
+        room_wait_ms: i64,
     ) -> anyhow::Result<Value> {
         let (events, _) = broadcast::channel(1);
         let slot = Arc::new(Slot {
@@ -313,7 +329,7 @@ impl Engine {
             viewers: Arc::new(AtomicUsize::new(0)),
             cmd: Mutex::new(None),
         });
-        let engine = Self::read(pool, server, origin, id, slot, 0).await?;
+        let engine = Self::read(pool, server, origin, id, slot, 0, room_wait_ms).await?;
         Ok(engine.public_json())
     }
 
@@ -324,6 +340,7 @@ impl Engine {
         id: Uuid,
         slot: Arc<Slot>,
         max_match_duration_ms: i64,
+        room_wait_ms: i64,
     ) -> anyhow::Result<Self> {
         let notify = slot.notify.clone();
         let events = slot.events.clone();
@@ -332,7 +349,7 @@ impl Engine {
             r#"SELECT m.game_id, m.variant, m.mode, m.room_code, m.time_limit_ms, m.timeout_policy,
                       m.max_consecutive_timeouts, m.grace_ms, m.allow_comments, m.rules_hash, m.status,
                       m.state, m.open_decisions, m.seed, m.seed_commit, m.result, m.end_reason,
-                      m.started_at, m.game_version_id, gv.version AS game_version, g.name AS game_name
+                      m.started_at, m.created_at, m.game_version_id, gv.version AS game_version, g.name AS game_name
                FROM matches m
                JOIN game_versions gv ON gv.id = m.game_version_id
                JOIN games g ON g.id = m.game_id
@@ -465,6 +482,8 @@ impl Engine {
             events,
             notify,
             started_at: row.started_at,
+            created_at: row.created_at,
+            room_wait_ms,
             max_match_duration_ms,
             slot,
         })
@@ -1549,10 +1568,10 @@ impl Engine {
         if !legal.iter().any(|a| a.get("type") == action.get("type")) {
             return self.nack(
                 "illegal_action",
-                "动作不合法",
+                "这一步不合法。用 get_legal_moves 看可以走的步",
                 Some(player_seat),
                 &payload,
-                json!({"legal_actions": legal}),
+                json!({"legal_count": legal.len()}),
             );
         }
         let commitment = payload
@@ -1623,10 +1642,10 @@ impl Engine {
             Err(err) => {
                 return self.nack(
                     "illegal_action",
-                    err.0,
+                    format!("{}。用 get_legal_moves 看可以走的步", err.0),
                     Some(player_seat),
                     &payload,
-                    json!({"legal_actions": legal}),
+                    json!({"legal_count": legal.len()}),
                 );
             }
         }
@@ -1907,6 +1926,12 @@ impl Engine {
             "status": self.status,
             "room_code": self.room_code,
             "time_limit_ms": self.time_limit_ms,
+            "move_count": self.chain.entries.iter().filter(|e| e["kind"] == "action").count(),
+            "expires_at": if self.status == "waiting" {
+                Value::from(self.created_at.timestamp_millis() + self.room_wait_ms)
+            } else {
+                Value::Null
+            },
             "grace_ms": self.grace_ms,
             "timeout_policy": self.policy.as_str(),
             "max_consecutive_timeouts": self.max_timeouts,

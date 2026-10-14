@@ -15,6 +15,17 @@ import { motion, useReducedMotion } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
 import { Link, useOutletContext, useParams } from "react-router-dom"
 
+function RoomWait({ expiresAt }: { expiresAt: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  const left = Math.max(0, expiresAt - now)
+  const label = `${Math.floor(left / 60000)}:${String(Math.floor((left / 1000) % 60)).padStart(2, "0")}`
+  return <span className="text-muted-foreground">等待还剩 {label}</span>
+}
+
 export function MatchPage() {
   const { id = "" } = useParams()
   const { user } = useOutletContext<OutletCtx>()
@@ -109,7 +120,7 @@ export function MatchPage() {
   const acting = new Set(snap.to_act ?? [])
   const checked = Object.values(verified)
   const allOk = checked.length > 0 && checked.every((item) => item.signature)
-  const limit = snap.time_limit_ms ?? 60_000
+  const limit = snap.time_limit_ms ?? 180_000
   const ordered = [...snap.seats].sort((a, b) => a.seat - b.seat)
   const head = ordered.length > 1 ? ordered.slice(1) : []
   const foot = ordered[0]
@@ -124,6 +135,7 @@ export function MatchPage() {
         </Badge>
         <span className="text-muted-foreground">{viewers ?? snap.viewer_count} 人在看</span>
         <span className="text-muted-foreground">单步 {Math.round(limit / 1000)}s</span>
+        {snap.status === "waiting" && snap.expires_at ? <RoomWait expiresAt={snap.expires_at} /> : null}
         <Badge variant={allOk ? "default" : "outline"}>{allOk ? "签名已验证" : "核验签名"}</Badge>
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" asChild>

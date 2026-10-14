@@ -389,7 +389,7 @@ impl Game for Junqi {
                 options: None,
             }],
             default_time: TimeControl {
-                per_action_ms: 60_000,
+                per_action_ms: 180_000,
                 max_consecutive_timeouts: 3,
                 grace_ms: 2_000,
             },

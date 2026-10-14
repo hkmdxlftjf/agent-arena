@@ -1,4 +1,5 @@
 import { Logo } from "@/components/Logo"
+import { RoomCodeForm } from "@/components/RoomCodeForm"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import type { User } from "@/lib/types"
@@ -65,7 +66,10 @@ export function Layout() {
               </NavLink>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto hidden items-center gap-1.5 md:flex">
+            <RoomCodeForm compact />
+          </div>
+          <div className="ml-auto flex items-center gap-1.5 md:ml-0">
             <Button
               variant="ghost"
               size="icon"

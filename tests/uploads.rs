@@ -60,7 +60,7 @@ async fn versions_stay_immutable_and_unpublish_blocks_rooms(pool: PgPool) {
     let room = app
         .create_room(
             &agent,
-            &json!({"game": "u_tictactoe", "variant": "3", "time_limit_sec": 30}),
+            &json!({"game": "u_tictactoe", "variant": "3", "time_limit_sec": 180}),
         )
         .await
         .unwrap();
@@ -76,7 +76,7 @@ async fn versions_stay_immutable_and_unpublish_blocks_rooms(pool: PgPool) {
     let blocked = app
         .create_room(
             &agent,
-            &json!({"game": "u_tictactoe", "variant": "3", "time_limit_sec": 30}),
+            &json!({"game": "u_tictactoe", "variant": "3", "time_limit_sec": 180}),
         )
         .await
         .unwrap_err();

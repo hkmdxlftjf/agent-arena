@@ -130,6 +130,7 @@ export type MatchSnap = {
   status: string
   room_code?: string | null
   time_limit_ms?: number
+  expires_at?: number | null
   grace_ms?: number
   timeout_policy?: string
   tip_seq: number
@@ -156,6 +157,11 @@ export type LiveCard = {
   room_code?: string | null
   variant?: string | null
   tip_seq?: number | null
+  time_limit_ms?: number
+  max_players?: number
+  move_count?: number
+  expires_at?: number | null
+  server_time?: number
   viewer_count: number
   seats: SeatCard[]
   view: GameView | null

@@ -47,6 +47,7 @@ jobs:
         working-directory: web
       - run: npm run build
         working-directory: web
+      - run: node scripts/test-usage.mjs
 
   shell:
     runs-on: ubuntu-latest

@@ -58,9 +58,13 @@ pub fn router(app: App) -> Router {
         .route("/sdk/game.ts", get(sdk_ts))
         .route("/examples/tic-tac-toe.js", get(example_js))
         .route("/api/matches", get(matches))
+        .route("/api/rooms", post(create_room_http))
+        .route("/api/rooms/{code}", get(room_by_code))
+        .route("/ws/lobby", get(ws_lobby))
         .route("/api/matches/{id}", get(match_one))
         .route("/api/matches/{id}/leave", post(leave_match))
         .route("/api/matches/{id}/log.jsonl", get(match_log))
+        .route("/api/matches/{id}/events", get(match_events))
         .route("/api/leaderboard", get(leaderboard))
         .route("/api/users/{handle}", get(user_profile))
         .route("/api/agents/{id}/profile", get(agent_profile))
@@ -288,6 +292,74 @@ async fn matches(
     Ok(Json(json!(app.list_live().await?)))
 }
 
+#[derive(Deserialize)]
+struct CreateRoomBody {
+    agent_id: Uuid,
+    game: String,
+    variant: Option<String>,
+    time_limit_sec: Option<i64>,
+    timeout_policy: Option<String>,
+    max_consecutive_timeouts: Option<i64>,
+}
+
+async fn create_room_http(
+    State(app): State<App>,
+    jar: CookieJar,
+    Json(body): Json<CreateRoomBody>,
+) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    let payload = json!({
+        "game": body.game,
+        "variant": body.variant,
+        "time_limit_sec": body.time_limit_sec,
+        "timeout_policy": body.timeout_policy,
+        "max_consecutive_timeouts": body.max_consecutive_timeouts,
+    });
+    Ok(Json(
+        app.create_room_as_user(&user, body.agent_id, &payload)
+            .await?,
+    ))
+}
+
+async fn room_by_code(
+    State(app): State<App>,
+    Path(code): Path<String>,
+) -> Result<Json<Value>, CallError> {
+    Ok(Json(app.room_by_code(&code).await?))
+}
+
+async fn ws_lobby(State(app): State<App>, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |socket| lobby_socket(app, socket))
+}
+
+async fn lobby_socket(app: App, mut socket: WebSocket) {
+    let mut last = String::new();
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+    loop {
+        tokio::select! {
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Ping(p))) => { let _ = socket.send(Message::Pong(p)).await; }
+                    Some(Err(_)) => break,
+                    _ => {}
+                }
+            }
+            _ = tick.tick() => {
+                let Ok(body) = app.list_live().await else { continue };
+                let text = serde_json::to_string(&body).unwrap_or_default();
+                if text != last {
+                    last = text;
+                    let msg = json!({"type":"rooms","data": body}).to_string();
+                    if socket.send(Message::Text(msg.into())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
 async fn match_one(State(app): State<App>, Path(id): Path<Uuid>) -> Result<Json<Value>, CallError> {
     Ok(Json(app.public_match(id).await?))
 }
@@ -299,6 +371,96 @@ async fn leave_match(
 ) -> Result<Json<Value>, CallError> {
     let user = require_user(&app, &jar).await?;
     Ok(Json(app.leave_as_user(user.id, id).await?))
+}
+
+#[derive(Deserialize)]
+struct EventsQuery {
+    token: Option<String>,
+}
+
+async fn match_events(
+    State(app): State<App>,
+    Path(id): Path<Uuid>,
+    Query(q): Query<EventsQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let header_token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| {
+            v.strip_prefix("Bearer ")
+                .or_else(|| v.strip_prefix("bearer "))
+        })
+        .map(|s| s.to_string());
+    let Some(token) = q.token.or(header_token) else {
+        return CallError::new(401, "unauthorized", "缺少 token").into_response();
+    };
+    let agent = match app.authenticate(token.trim()).await {
+        Ok(agent) => agent,
+        Err(err) => return err.into_response(),
+    };
+    let last = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let (out_tx, out_rx) = tokio::sync::mpsc::channel::<String>(16);
+    tokio::spawn(async move {
+        let _ = out_tx.send(crate::sse::comment("open")).await;
+        let mut seen = last;
+        loop {
+            let turn = match app.peek_turn(&agent, id).await {
+                Ok(value) => value,
+                Err(err) => {
+                    let data = json!({"error": err.code, "message": err.message}).to_string();
+                    let _ = out_tx.send(crate::sse::event("error", "", &data)).await;
+                    break;
+                }
+            };
+            let kind = match turn.get("status").and_then(|v| v.as_str()).unwrap_or("") {
+                "your_turn" => "your_turn",
+                "game_over" | "match_over" => "game_over",
+                _ => "opponent_moved",
+            };
+            let move_no = turn.get("move_no").and_then(|v| v.as_i64()).unwrap_or(0);
+            let match_status = turn
+                .get("match_status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let event_id = format!("{move_no}:{match_status}:{kind}");
+            if event_id != seen {
+                seen = event_id.clone();
+                let data = turn.to_string();
+                if out_tx
+                    .send(crate::sse::event(kind, &event_id, &data))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            if kind == "game_over" {
+                break;
+            }
+            let slot = app.slot(id);
+            let notified = slot.notify.notified();
+            tokio::pin!(notified);
+            tokio::select! {
+                _ = &mut notified => {}
+                _ = tokio::time::sleep(std::time::Duration::from_secs(crate::sse::KEEPALIVE_SECS)) => {
+                    if out_tx.send(crate::sse::comment("keepalive")).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let stream = futures::stream::unfold(out_rx, |mut rx| async move {
+        rx.recv()
+            .await
+            .map(|chunk| (Ok::<_, std::io::Error>(chunk), rx))
+    });
+    crate::sse::response(stream)
 }
 
 async fn match_log(State(app): State<App>, Path(id): Path<Uuid>) -> Result<Response, CallError> {
@@ -358,6 +520,12 @@ fn skill_bundle(origin: &str, public_base_url: &str) -> (Vec<u8>, String) {
             zip.write_all(skill_md.as_bytes()).ok();
             zip.start_file("arena/scripts/sign.mjs", opts).ok();
             zip.write_all(sign_mjs.as_bytes()).ok();
+            zip.start_file("arena/scripts/usage.mjs", opts).ok();
+            zip.write_all(include_str!("../skill/arena/scripts/usage.mjs").as_bytes())
+                .ok();
+            zip.start_file("arena/scripts/listen.mjs", opts).ok();
+            zip.write_all(include_str!("../skill/arena/scripts/listen.mjs").as_bytes())
+                .ok();
             zip.finish().ok();
         }
         let bytes = cursor.into_inner();

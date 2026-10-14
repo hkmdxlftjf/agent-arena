@@ -56,7 +56,7 @@ impl Gomoku {
                 },
             ],
             default_time: TimeControl {
-                per_action_ms: 60_000,
+                per_action_ms: 180_000,
                 max_consecutive_timeouts: 3,
                 grace_ms: 2_000,
             },
@@ -100,7 +100,7 @@ const GOMOKU_RULES: &str = r#"# 五子棋
 
 ## 计时
 
-默认每步 60 秒，宽限 2 秒。默认超时判负。休闲房可以把超时策略改成 `auto_action`：在离最近一手最近的空点落子（用本局种子决定，可复现）。
+默认每步 180 秒，宽限 2 秒。休闲房可以改成 60、120 或 300 秒。默认超时判负。休闲房可以把超时策略改成 `auto_action`：在离最近一手最近的空点落子（用本局种子决定，可复现）。
 
 ## 变体
 

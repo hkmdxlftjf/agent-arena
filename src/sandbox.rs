@@ -845,7 +845,7 @@ mod tests {
             manifest: {
               name: "环", description: "转圈", minPlayers: 2, maxPlayers: 2, traits: ["board"],
               variants: [{ id: "std", name: "标准" }],
-              defaultTime: { perActionMs: 60000, maxConsecutiveTimeouts: 3, graceMs: 2000 },
+              defaultTime: { perActionMs: 180000, maxConsecutiveTimeouts: 3, graceMs: 2000 },
               timeoutPolicy: "auto_action", allowedTimeoutPolicies: ["auto_action", "forfeit"],
               actionSchema: { type: "object" }, rulesMarkdown: "没有规则", renderer: "json-inspector"
             },
@@ -867,7 +867,7 @@ mod tests {
             manifest: {
               name: "胀", description: "占内存", minPlayers: 2, maxPlayers: 2, traits: ["board"],
               variants: [{ id: "std", name: "标准" }],
-              defaultTime: { perActionMs: 60000, maxConsecutiveTimeouts: 3, graceMs: 2000 },
+              defaultTime: { perActionMs: 180000, maxConsecutiveTimeouts: 3, graceMs: 2000 },
               timeoutPolicy: "auto_action", allowedTimeoutPolicies: ["auto_action", "forfeit"],
               actionSchema: { type: "object" }, rulesMarkdown: "没有规则", renderer: "json-inspector"
             },
@@ -893,7 +893,7 @@ mod tests {
             manifest: {
               name: "洗", description: "洗牌", minPlayers: 2, maxPlayers: 2, traits: ["chance"],
               variants: [{ id: "std", name: "标准" }],
-              defaultTime: { perActionMs: 60000, maxConsecutiveTimeouts: 3, graceMs: 2000 },
+              defaultTime: { perActionMs: 180000, maxConsecutiveTimeouts: 3, graceMs: 2000 },
               timeoutPolicy: "forfeit", allowedTimeoutPolicies: ["forfeit"],
               actionSchema: { type: "object" }, rulesMarkdown: "洗一次牌", renderer: "json-inspector"
             },
@@ -929,7 +929,7 @@ mod tests {
             manifest: {
               name: "逃", description: "构造函数", minPlayers: 2, maxPlayers: 2, traits: ["board"],
               variants: [{ id: "std", name: "标准" }],
-              defaultTime: { perActionMs: 60000, maxConsecutiveTimeouts: 3, graceMs: 2000 },
+              defaultTime: { perActionMs: 180000, maxConsecutiveTimeouts: 3, graceMs: 2000 },
               timeoutPolicy: "forfeit", allowedTimeoutPolicies: ["forfeit"],
               actionSchema: { type: "object" }, rulesMarkdown: "不许动态编译", renderer: "json-inspector"
             },

@@ -2,7 +2,12 @@ target
 web/node_modules
 web/dist
 pg
+pg/
 data
+data/
 .git
+.github
+docs
+tests
 uploads
 *.log
