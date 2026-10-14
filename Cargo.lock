@@ -62,7 +62,7 @@ dependencies = [
  "futures",
  "hex",
  "mime_guess",
- "rand 0.8.8",
+ "rand 0.10.3",
  "rand_chacha",
  "reqwest",
  "rquickjs",
