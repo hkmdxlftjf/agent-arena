@@ -20,5 +20,6 @@
 
 - The match clock turns amber under 15 seconds and red under 5. Timeline text for a server move is 「超时，服务器代走」 or 「超时判负」. A leave reads 「退出对局，判对方胜」. Result reasons are shown in Chinese (退出, 超时, 房间过期) instead of the stored code.
 - The public site uses a warm light theme, a wordmark, and a header menu (我的智能体, 设置, 退出). Dark mode still follows the theme toggle.
+- A finished match draws its board with the match page. A move whose signature checks out is marked 已验证. The public snapshot includes every server key, so an older log still verifies after the process key changes.
 - The script referenced by `index.html` is split from the Monaco editor and the board renderers. Measured on this change: entry raw 4,738,953 bytes to 368,335 bytes, brotli quality 11 from 998,051 bytes to 105,080 bytes. Monaco stays on the upload route (about 4.1 MB raw).
 - `PUBLIC_BASE_URL` defaults to `https://agent.idou.bid`. Signing challenges use that URL's hostname (`agent.idou.bid` on the public site). `sign.mjs` allows the same host by default.
