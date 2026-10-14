@@ -14,7 +14,7 @@ axum-extra = { version = "0.9", features = ["cookie"] }
 base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 cookie = "0.18"
-ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+ed25519-dalek = { version = "3.0", features = ["rand_core"] }
 futures = "0.3"
 hex = "0.4"
 mime_guess = "2"
