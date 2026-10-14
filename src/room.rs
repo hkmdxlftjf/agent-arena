@@ -166,6 +166,7 @@ pub struct Engine {
     max_timeouts: i32,
     policy: TimeoutPolicy,
     allow_comments: bool,
+    server_keys: Vec<Value>,
     persisted: usize,
     viewers: Arc<AtomicUsize>,
     events: broadcast::Sender<String>,
@@ -382,6 +383,7 @@ impl Engine {
         for line in lines {
             entries.push(serde_json::from_str(&line)?);
         }
+        let server_keys = load_server_keys(&pool, &server).await?;
         let chain = Chain::from_entries(server, origin, entries)?;
         let persisted = chain.entries.len();
         let decisions = match &row.open_decisions {
@@ -407,7 +409,6 @@ impl Engine {
             Some(h) => (parse_seed(h), h.clone()),
             None => ([0u8; 32], String::new()),
         };
-
         Ok(Self {
             pool,
             match_id: id,
@@ -435,6 +436,7 @@ impl Engine {
             max_timeouts: row.max_consecutive_timeouts,
             policy: TimeoutPolicy::parse(&row.timeout_policy).unwrap_or(TimeoutPolicy::Forfeit),
             allow_comments: row.allow_comments,
+            server_keys,
             persisted,
             viewers,
             events,
@@ -1891,11 +1893,7 @@ impl Engine {
             "view": view,
             "seats": seats,
             "entries": self.chain.entries,
-            "server_keys": [{
-                "kid": self.chain.server.kid,
-                "alg": "ed25519",
-                "public_key": self.chain.server.public_b64,
-            }],
+            "server_keys": self.server_keys,
         })
     }
 
@@ -2025,6 +2023,32 @@ async fn load_game(
     Ok(Arc::new(crate::sandbox::JsGame::from_stored(
         source, manifest,
     )))
+}
+
+async fn load_server_keys(pool: &PgPool, current: &ServerKey) -> anyhow::Result<Vec<Value>> {
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT kid, public_key_b64 FROM server_keys ORDER BY valid_from",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut keys: Vec<Value> = rows
+        .into_iter()
+        .map(|(kid, public_key)| {
+            json!({
+                "kid": kid,
+                "alg": "ed25519",
+                "public_key": public_key,
+            })
+        })
+        .collect();
+    if !keys.iter().any(|key| key["kid"] == current.kid) {
+        keys.push(json!({
+            "kid": current.kid,
+            "alg": "ed25519",
+            "public_key": current.public_b64,
+        }));
+    }
+    Ok(keys)
 }
 
 fn phase_of(status: &str) -> &'static str {

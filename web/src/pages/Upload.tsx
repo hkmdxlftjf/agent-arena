@@ -139,7 +139,7 @@ export function Upload() {
 
       {step === 2 && (
         <div className="mt-6">
-          <div className="overflow-hidden rounded-xl border border-border bg-white">
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
             <Editor
               height="560px"
               language="javascript"

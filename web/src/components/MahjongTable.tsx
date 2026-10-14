@@ -10,14 +10,14 @@ function label(code: string): string {
 
 function Tile({ code, hidden = false, hot = false }: { code?: string; hidden?: boolean; hot?: boolean }) {
   if (hidden) {
-    return <span className="inline-block h-8 w-6 rounded-sm border border-[#1e3a5f] bg-[#1e3a5f]" />
+    return <span className="piece inline-block h-8 w-6 rounded-sm border border-[#1c3a32] bg-[#2f6b57]" />
   }
   return (
     <motion.span
       initial={{ y: 6, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.28 }}
-      className={`inline-flex h-9 min-w-7 items-center justify-center rounded-sm border bg-[#f6f1e7] px-1 text-[11px] text-zinc-800 ${hot ? "border-primary" : "border-[#d6d3d1]"}`}
+      className={`piece inline-flex h-9 min-w-7 items-center justify-center rounded-sm border bg-[#fffaf3] px-1 text-[11px] text-[#1c1612] ${hot ? "border-primary" : "border-[#e0d3c2]"}`}
     >
       {code ? label(code) : ""}
     </motion.span>
@@ -76,7 +76,7 @@ export function MahjongTable({
 }) {
   const order = [2, 3, 1, 0]
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-[#fafafa] p-3">
+    <div className="space-y-3 rounded-2xl border border-border bg-[#f6efe4] p-3 dark:bg-[#1a1612]">
       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
         <span>{PHASE[phase || ""] || phase || "准备"}</span>
         <span>牌墙 {wall}</span>
@@ -87,7 +87,7 @@ export function MahjongTable({
         )}
       </div>
       {order.map((seat) => (
-        <div key={seat} className={`rounded-xl border bg-white p-2 ${hu[seat] ? "border-primary" : "border-border"}`}>
+        <div key={seat} className={`rounded-xl border bg-card p-2 ${hu[seat] ? "border-primary" : "border-border"}`}>
           <p className="mb-1 text-xs text-muted-foreground">
             {roles[seat]}
             {dingque[seat] ? ` · 缺${SUIT[dingque[seat]] || dingque[seat]}` : ""}

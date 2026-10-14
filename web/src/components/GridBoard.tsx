@@ -14,7 +14,7 @@ export function GridBoard({
   const marks = new Map(cells.map((cell) => [cell.at, cell]))
   const box = compact ? "h-7 w-7 text-xs" : "h-16 w-16 text-2xl sm:h-[4.5rem] sm:w-[4.5rem]"
   return (
-    <div className="inline-block rounded-2xl border border-border bg-white p-3 shadow-sm">
+    <div className="paper-board inline-block rounded-2xl border border-[#c4a574] p-3">
       <div className="grid gap-px" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
         {Array.from({ length: n }, (_, row) => {
           const rank = n - row
@@ -23,7 +23,7 @@ export function GridBoard({
             const mark = marks.get(at)
             const tone = mark?.seat === 0 ? "text-primary" : "text-neutral-800"
             return (
-              <div key={at} className={`${box} grid place-items-center border border-neutral-200 bg-white font-medium ${tone}`}>
+              <div key={at} className={`${box} grid place-items-center border border-[#e0d3c2] bg-card font-medium ${tone}`}>
                 {mark?.label ?? ""}
               </div>
             )

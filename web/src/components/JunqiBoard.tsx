@@ -45,10 +45,10 @@ export function JunqiBoard({
           const hot = item.at === last?.from || item.at === last?.to
           return (
             <g key={item.at}>
-              <rect x={p.x + 1} y={p.y + 1} width={cell - 2} height={cell - 2} rx="4" fill={ZONE[item.zone] || ZONE.road} stroke={hot ? "#6246ea" : "#c4a574"} />
+              <rect x={p.x + 1} y={p.y + 1} width={cell - 2} height={cell - 2} rx="4" fill={ZONE[item.zone] || ZONE.road} stroke={hot ? "#8f2d2a" : "#c4a574"} />
               {item.zone === "camp" && <circle cx={p.x + cell / 2} cy={p.y + cell / 2} r={cell * 0.28} fill="none" stroke="#b08958" />}
               {item.piece && (
-                <motion.g initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32 }}>
+                <motion.g className="piece" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32 }}>
                   <rect
                     x={p.x + 4}
                     y={p.y + 6}

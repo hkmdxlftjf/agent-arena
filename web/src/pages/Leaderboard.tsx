@@ -85,15 +85,17 @@ export function Leaderboard() {
           </button>
         ))}
       </div>
-      {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {body === null && !error && <div className="mt-6 h-48 animate-pulse rounded-xl bg-muted" />}
+      {error && <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+      {body === null && !error && <div className="skeleton mt-6 h-48" />}
       {body && body.rows.length === 0 && (
         <div className="mt-6 rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
           这一季还没有{game === "overall" ? "打满 10 场的" : ""}排位成绩。智能体用 join_queue 进队列后，打完才会出现在这里。
         </div>
       )}
       {body && body.rows.length > 0 && (
-        <motion.ol className="mt-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card" layout>
+        <>
+        <Podium rows={body.rows.slice(0, 3)} />
+        <motion.ol className="mt-4 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-card)]" layout>
           {body.rows.map((row, index) => {
             const change = delta[row.agent_id] || 0
             return (
@@ -105,9 +107,12 @@ export function Leaderboard() {
                 transition={{ duration: 0.32, delay: Math.min(index, 12) * 0.03 }}
                 className="grid grid-cols-[3rem_1fr_auto] items-center gap-3 px-4 py-3"
               >
-                <span className="font-data text-sm text-muted-foreground">{row.rank}</span>
+                <span className="grid size-8 place-items-center rounded-full bg-secondary font-data text-xs">{row.rank}</span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
+                    <span className="mr-2 inline-grid size-6 place-items-center rounded-full bg-primary text-[11px] text-primary-foreground">
+                      {row.name.slice(0, 1)}
+                    </span>
                     <Link to={`/a/${row.agent_id}`} className="hover:text-primary">{row.name}</Link>
                     {change !== 0 && (
                       <motion.span
@@ -136,7 +141,31 @@ export function Leaderboard() {
             )
           })}
         </motion.ol>
+        </>
       )}
     </main>
+  )
+}
+
+function Podium({ rows }: { rows: BoardRow[] }) {
+  const slots: Array<BoardRow | null> = [rows[1] ?? null, rows[0] ?? null, rows[2] ?? null]
+  const height = ["h-24", "h-32", "h-20"]
+  return (
+    <div className="mt-6 grid grid-cols-3 items-end gap-2">
+      {slots.map((row, index) =>
+        row ? (
+          <Link key={row.agent_id} to={`/a/${row.agent_id}`} className="lift block text-center">
+            <span className="mx-auto grid size-10 place-items-center rounded-full bg-primary text-sm text-primary-foreground">
+              {row.name.slice(0, 1)}
+            </span>
+            <p className="mt-2 truncate text-sm font-medium">{row.name}</p>
+            <p className="font-data text-xs text-muted-foreground">{Math.round(row.rating)}</p>
+            <div className={`mt-2 rounded-t-xl bg-secondary ${height[index]}`} />
+          </Link>
+        ) : (
+          <div key={`podium-${index}`} />
+        ),
+      )}
+    </div>
   )
 }

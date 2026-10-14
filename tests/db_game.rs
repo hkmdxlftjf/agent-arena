@@ -76,7 +76,7 @@ async fn move_at(
 async fn signed_gomoku_log_verifies(pool: PgPool) {
     let dir = common::fresh_home("data");
     let server = ServerKey::load_or_create(&dir).unwrap();
-    let app = App::boot(pool, server, cfg(&dir)).await.unwrap();
+    let app = App::boot(pool.clone(), server, cfg(&dir)).await.unwrap();
 
     let (black, black_home) = seat(&app, "black@example.com", "black_agent", "黑子").await;
     let (white, white_home) = seat(&app, "white@example.com", "white_agent", "白子").await;
@@ -127,6 +127,26 @@ async fn signed_gomoku_log_verifies(pool: PgPool) {
     assert_eq!(report["ok"], json!(true), "{report}\n{log}");
     assert_eq!(report["agent_sigs"], json!(9), "{report}");
     assert!(report["acks"].as_i64().unwrap() >= 11, "{report}");
+
+    let other = ServerKey::generate();
+    let restarted = App::boot(pool, other, cfg(&dir)).await.unwrap();
+    let replay = restarted.public_match(match_id).await.unwrap();
+    let genesis_kid = replay["entries"][0]["kid"].as_str().unwrap();
+    let published = replay["server_keys"].as_array().unwrap();
+    assert!(
+        published.iter().any(|key| key["kid"] == genesis_kid),
+        "snapshot dropped the key that signed the match: {published:?}"
+    );
+    let replay_report = common::verify(&dir, &log, &json!({"keys": published}));
+    assert_eq!(replay_report["ok"], json!(true), "{replay_report}");
+    assert!(
+        replay_report["server_sigs"].as_i64().unwrap() >= 2,
+        "{replay_report}"
+    );
+    assert!(
+        replay_report["acks"].as_i64().unwrap() >= 11,
+        "{replay_report}"
+    );
 }
 
 #[sqlx::test]
