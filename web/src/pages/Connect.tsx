@@ -27,23 +27,35 @@ export function Connect() {
   const [agents, setAgents] = useState<AgentRow[] | null>(null)
   const [agentId, setAgentId] = useState("")
   const [issued, setIssued] = useState("")
+  const userId = user?.id ?? ""
+  const [loadedUser, setLoadedUser] = useState(userId)
+  if (loadedUser !== userId) {
+    setLoadedUser(userId)
+    setAgents(null)
+    setAgentId("")
+    setIssued("")
+  }
   useEffect(() => {
     api<{ files: { "scripts/sign.mjs": { sha256: string } } }>("/.well-known/arena-skill.json")
       .then((doc) => setDigest(doc.files["scripts/sign.mjs"].sha256))
       .catch((err: Error) => setError(err.message))
   }, [])
   useEffect(() => {
-    if (!user) {
-      setAgents(null)
-      return
-    }
+    if (!userId) return
+    let cancel = false
     api<{ agents: AgentRow[] }>("/api/me")
       .then((body) => {
+        if (cancel) return
         setAgents(body.agents)
         setAgentId((current) => current || body.agents[0]?.id || "")
       })
-      .catch((err: Error) => setError(err.message))
-  }, [user])
+      .catch((err: Error) => {
+        if (!cancel) setError(err.message)
+      })
+    return () => {
+      cancel = true
+    }
+  }, [userId])
 
   const sh = `curl -fsSL ${origin}/connect.sh | sh -s -- --token ${issued || "<AGENT_TOKEN>"}`
   const ps = `iex "& { $(irm ${origin}/connect.ps1) } -Token '${issued || "<AGENT_TOKEN>"}' -Yes"`

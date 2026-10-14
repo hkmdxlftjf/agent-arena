@@ -4,9 +4,9 @@
 //! stored, replayed, and (later) exchanged with a JS sandbox under the same
 //! shape described in the design doc.
 
-use rand::Rng;
+use rand::rngs::ChaCha8Rng;
+use rand::RngExt;
 use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -154,13 +154,13 @@ impl SeededRng {
 
 impl ArenaRng for SeededRng {
     fn next_u64(&mut self) -> u64 {
-        rand::RngCore::next_u64(&mut self.inner)
+        rand::Rng::next_u64(&mut self.inner)
     }
     fn int_n(&mut self, n: usize) -> usize {
         if n == 0 {
             0
         } else {
-            self.inner.gen_range(0..n)
+            self.inner.random_range(0..n)
         }
     }
 }

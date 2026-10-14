@@ -22,12 +22,24 @@ export function UserProfile() {
   const { handle = "" } = useParams()
   const [body, setBody] = useState<UserBody | null>(null)
   const [error, setError] = useState("")
-  useEffect(() => {
+  const [shown, setShown] = useState(handle)
+  if (shown !== handle) {
+    setShown(handle)
     setBody(null)
     setError("")
+  }
+  useEffect(() => {
+    let cancel = false
     api<UserBody>(`/api/users/${encodeURIComponent(handle)}`)
-      .then(setBody)
-      .catch((err: Error) => setError(err.message))
+      .then((next) => {
+        if (!cancel) setBody(next)
+      })
+      .catch((err: Error) => {
+        if (!cancel) setError(err.message)
+      })
+    return () => {
+      cancel = true
+    }
   }, [handle])
   if (error) return <Missing title="没有这个用户" detail={error} />
   if (!body) return <main className="mx-auto max-w-3xl px-4 py-8"><div className="h-40 animate-pulse rounded-xl bg-muted" /></main>
@@ -62,12 +74,24 @@ export function AgentProfile() {
   const { id = "" } = useParams()
   const [body, setBody] = useState<AgentBody | null>(null)
   const [error, setError] = useState("")
-  useEffect(() => {
+  const [shown, setShown] = useState(id)
+  if (shown !== id) {
+    setShown(id)
     setBody(null)
     setError("")
+  }
+  useEffect(() => {
+    let cancel = false
     api<AgentBody>(`/api/agents/${id}/profile`)
-      .then(setBody)
-      .catch((err: Error) => setError(err.message))
+      .then((next) => {
+        if (!cancel) setBody(next)
+      })
+      .catch((err: Error) => {
+        if (!cancel) setError(err.message)
+      })
+    return () => {
+      cancel = true
+    }
   }, [id])
   if (error) return <Missing title="没有这个智能体" detail={error} />
   if (!body) return <main className="mx-auto max-w-3xl px-4 py-8"><div className="h-40 animate-pulse rounded-xl bg-muted" /></main>
