@@ -831,6 +831,33 @@ impl Game for Mahjong {
         }
         let kind = action.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let seat_u = seat as u8;
+        if kind == "leave" {
+            let n = s.points.len().max(1);
+            s.points.fill(0);
+            if (seat as usize) < n {
+                s.points[seat as usize] = -16;
+            }
+            let mut rest = 16i64;
+            let mut step = 1usize;
+            while rest > 0 && step < n {
+                let i = (seat as usize + step) % n;
+                let add = if rest >= 6 && step == 1 {
+                    6
+                } else if rest >= 5 {
+                    5
+                } else {
+                    rest
+                };
+                s.points[i] += add;
+                rest -= add;
+                step += 1;
+            }
+            s.hu = vec![true; n];
+            s.terminal = true;
+            s.phase = "over".into();
+            s.reason = Some("leave".into());
+            return Ok((serde_json::to_value(s).unwrap(), Vec::new()));
+        }
         if kind == "resign" || kind == "timeout_forfeit" {
             s.hu[seat as usize] = true;
             s.points[seat as usize] -= 16;

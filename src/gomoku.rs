@@ -220,10 +220,15 @@ impl Game for Gomoku {
         if st.winner.is_some() {
             return Err(GameError("对局已结束".into()));
         }
-        if action.get("type").and_then(|v| v.as_str()) == Some("resign") {
+        let kind = action.get("type").and_then(|v| v.as_str());
+        if kind == Some("resign") || kind == Some("leave") {
             let winner = 1 - seat;
             st.winner = Some(winner as i8);
-            st.reason = Some("resign".into());
+            st.reason = Some(if kind == Some("leave") {
+                "leave".into()
+            } else {
+                "resign".into()
+            });
             let event = json!({
                 "type": "resign",
                 "data": {"seat": seat},

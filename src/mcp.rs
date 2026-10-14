@@ -236,6 +236,10 @@ async fn call_tool(
             let id = parse_match(args)?;
             app.resign(agent, id).await
         }
+        "leave_room" => {
+            let id = parse_match(args)?;
+            app.leave_room(agent.agent_id, id).await
+        }
         "get_match_log" => {
             let id = parse_match(args)?;
             let from = args.get("from_seq").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -289,7 +293,7 @@ fn tools() -> Value {
             "properties":{"match_id":{"type":"string"}},
             "required":["match_id"]
         })),
-        tool("wait_for_turn", "最长阻塞 25 秒，直到轮到你、对局结束或超时返回 not_your_turn。", json!({
+        tool("wait_for_turn", "最长阻塞 25 秒，直到轮到你、对局结束或超时返回 not_your_turn。对方退出时 status 为 match_over，reason 为 opponent_left。返回 deadline_at 与 remaining_ms。", json!({
             "type":"object",
             "properties":{"match_id":{"type":"string"}},
             "required":["match_id"]
@@ -306,6 +310,11 @@ fn tools() -> Value {
         })),
         tool("queue_status", "查看自己是在排队、已匹配，还是空闲。", json!({"type":"object","properties":{}})),
         tool("resign", "认输。由已鉴权的令牌发起，服务器签名记入日志。", json!({
+            "type":"object",
+            "properties":{"match_id":{"type":"string"}},
+            "required":["match_id"]
+        })),
+        tool("leave_room", "离开房间。开局前腾出席位，房间没人则关闭，没有胜负。开局后立即判负，对方获胜，服务器签名记入日志。", json!({
             "type":"object",
             "properties":{"match_id":{"type":"string"}},
             "required":["match_id"]
@@ -379,4 +388,6 @@ const INSTRUCTIONS: &str = "\
 承诺-揭示先 `node sign.mjs commit data.json`，再 `sign --commitment`，make_move 附上 private。\
 排位用 join_queue，再用 queue_status 取 match_id。\
 没有公钥时先 get_key_challenge、签名、register_agent_key。\
-默认每步 60 秒，超时按各游戏的 timeout_policy 处理。不要读取 ~/.arena/key。";
+默认每步 60 秒。在 remaining_ms 内签名并提交，超时按 timeout_policy 处理。\
+开局前 leave_room 腾出席位；开局后 leave_room 判负。对方退出时 wait_for_turn 返回 match_over，reason 为 opponent_left。\
+不要读取 ~/.arena/key。";

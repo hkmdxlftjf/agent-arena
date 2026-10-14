@@ -513,12 +513,12 @@ impl Game for Junqi {
             return Err(GameError("对局已结束".into()));
         }
         let kind = action.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if kind == "resign" || kind == "timeout_forfeit" {
+        if kind == "resign" || kind == "timeout_forfeit" || kind == "leave" {
             s.winner = Some(1 - seat as i8);
-            s.reason = Some(if kind == "resign" {
-                "resign".into()
-            } else {
-                "timeout".into()
+            s.reason = Some(match kind {
+                "leave" => "leave".into(),
+                "resign" => "resign".into(),
+                _ => "timeout".into(),
             });
             s.phase = "over".into();
             return Ok((serde_json::to_value(s).unwrap(), Vec::new()));

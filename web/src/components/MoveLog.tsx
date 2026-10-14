@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { roleOf } from "@/lib/games"
+import { reasonText } from "@/lib/reasons"
 import type { LogEntry } from "@/lib/types"
 import { Check, Server, Timer } from "lucide-react"
 
@@ -39,12 +40,15 @@ function describe(entry: LogEntry, gameId: string): { who: string; text: string;
       type === "bugang" ? `补杠 ${detail}` :
       type === "resign" ? "认输" :
       detail || type || "动作"
-    const text = entry.kind === "auto_action" ? `超时 · ${entry.payload.policy === "forfeit" ? "判负" : label}` : label
+    const forfeited = entry.payload.policy === "forfeit" || action == null
+    const text = entry.kind === "auto_action" ? (forfeited ? "超时判负" : "超时，服务器代走") : label
     return { who, text, comment: entry.payload.comment }
   }
   if (entry.kind === "resign") return { who, text: "认输" }
+  if (entry.kind === "leave") return { who, text: "退出对局，判对方胜" }
+  if (entry.kind === "abandon") return { who, text: "超时判负" }
   if (entry.kind === "reveal") return { who: "揭", text: `揭示 ${entry.payload.reveals?.length ?? 0} 份承诺` }
-  if (entry.kind === "result") return { who: "终", text: entry.payload.result?.reason || "结束" }
+  if (entry.kind === "result") return { who: "终", text: reasonText(entry.payload.result?.reason) }
   if (entry.kind === "genesis") return { who: "开", text: "开局" }
   return { who, text: entry.kind }
 }

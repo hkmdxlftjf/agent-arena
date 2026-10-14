@@ -3,21 +3,25 @@ import { Countdown } from "@/components/Countdown"
 import { MoveLog } from "@/components/MoveLog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import type { OutletCtx } from "@/components/Layout"
 import { api } from "@/lib/api"
 import { roleOf } from "@/lib/games"
+import { reasonText, statusText } from "@/lib/reasons"
 import type { MatchSnap, SeatCard } from "@/lib/types"
 import { ed25519Available, verifyEntry } from "@/lib/verify"
 import { useEffect, useRef, useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useOutletContext, useParams } from "react-router-dom"
 
 export function MatchPage() {
   const { id = "" } = useParams()
+  const { user } = useOutletContext<OutletCtx>()
   const [snap, setSnap] = useState<MatchSnap | null>(null)
   const [viewers, setViewers] = useState<number | null>(null)
   const [error, setError] = useState("")
   const [verified, setVerified] = useState<Record<number, { signature: boolean; ack: boolean }>>({})
   const seen = useRef(new Set<number>())
   const [copied, setCopied] = useState(false)
+  const [leaving, setLeaving] = useState(false)
 
   useEffect(() => {
     let closed = false
@@ -112,7 +116,7 @@ export function MatchPage() {
         <h1 className="text-xl font-medium">{snap.game_name || "对局"}</h1>
         <Badge variant="secondary">{snap.mode === "ranked" ? "排位" : "休闲"}</Badge>
         <Badge variant={snap.status === "running" ? "default" : "outline"}>
-          {snap.status === "running" ? "直播" : snap.status === "waiting" ? "等待入座" : snap.status === "finished" ? "已结束" : snap.status}
+          {statusText(snap.status)}
         </Badge>
         <span className="text-muted-foreground">{viewers ?? snap.viewer_count} 人在看</span>
         <span className="text-muted-foreground">单步 {Math.round(limit / 1000)}s</span>
@@ -131,6 +135,25 @@ export function MatchPage() {
           >
             {copied ? "已复制" : "分享"}
           </Button>
+          {user &&
+            (snap.status === "waiting" || snap.status === "running") &&
+            snap.seats.some((seat) => seat.owner_handle === user.handle) && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={leaving}
+                onClick={() => {
+                  setLeaving(true)
+                  void api(`/api/matches/${snap.id}/leave`, { method: "POST" })
+                    .then(() => api<MatchSnap>(`/api/matches/${snap.id}`))
+                    .then((next) => setSnap(next))
+                    .catch((err: Error) => setError(err.message))
+                    .finally(() => setLeaving(false))
+                }}
+              >
+                {leaving ? "退出中" : "退出"}
+              </Button>
+            )}
         </div>
       </div>
 
@@ -167,9 +190,9 @@ export function MatchPage() {
           {snap.status === "waiting" && (
             <p className="mt-3 text-sm text-muted-foreground">{snap.room_code ? `房间码 ${snap.room_code}，还在等人入座` : "等待入座"}</p>
           )}
-          {snap.status === "finished" && (
+          {(snap.status === "finished" || snap.status === "expired" || snap.status === "aborted") && (
             <p className="mt-3 text-sm">
-              终局：{snap.result?.reason || snap.end_reason || "结束"}
+              终局：{reasonText(snap.result?.reason || snap.end_reason)}
               {snap.seed ? <span className="font-data mt-1 block text-xs text-muted-foreground">seed {snap.seed}</span> : null}
             </p>
           )}

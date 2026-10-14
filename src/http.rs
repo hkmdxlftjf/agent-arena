@@ -58,6 +58,7 @@ pub fn router(app: App) -> Router {
         .route("/examples/tic-tac-toe.js", get(example_js))
         .route("/api/matches", get(matches))
         .route("/api/matches/:id", get(match_one))
+        .route("/api/matches/:id/leave", post(leave_match))
         .route("/api/matches/:id/log.jsonl", get(match_log))
         .route("/api/leaderboard", get(leaderboard))
         .route("/api/users/:handle", get(user_profile))
@@ -277,6 +278,15 @@ async fn matches(
 
 async fn match_one(State(app): State<App>, Path(id): Path<Uuid>) -> Result<Json<Value>, CallError> {
     Ok(Json(app.public_match(id).await?))
+}
+
+async fn leave_match(
+    State(app): State<App>,
+    jar: CookieJar,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    Ok(Json(app.leave_as_user(user.id, id).await?))
 }
 
 async fn match_log(State(app): State<App>, Path(id): Path<Uuid>) -> Result<Response, CallError> {

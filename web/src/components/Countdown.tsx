@@ -27,7 +27,7 @@ export function Countdown({
   const r = 18
   const c = 2 * Math.PI * r
   const tone =
-    remaining == null ? "text-zinc-300" : remaining < 10_000 ? "text-red-600" : remaining < 30_000 ? "text-amber-600" : "text-primary"
+    remaining == null ? "text-zinc-300" : remaining < 5_000 ? "text-red-600" : remaining < 15_000 ? "text-amber-600" : "text-primary"
   const label =
     remaining == null ? "—" : `${Math.floor(remaining / 60000)}:${String(Math.floor((remaining / 1000) % 60)).padStart(2, "0")}`
 
