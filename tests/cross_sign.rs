@@ -12,7 +12,7 @@ fn node_signature_roundtrips_through_the_hash_chain() {
     let home = common::fresh_home("cross");
     let key = common::keygen(&home);
     let server = ServerKey::generate();
-    let mut chain = Chain::new(server.clone());
+    let mut chain = Chain::new(server.clone(), "agent.idou.bid");
     let match_id = "11111111-1111-1111-1111-111111111111";
     chain.append_server(
         "genesis",
@@ -34,7 +34,7 @@ fn node_signature_roundtrips_through_the_hash_chain() {
         }),
     );
     let request = json!({
-        "domain": domain("move"),
+        "domain": domain("agent.idou.bid", "move"),
         "payload": {
             "v": 1,
             "match_id": match_id,

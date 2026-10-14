@@ -13,20 +13,26 @@ use serde_json::{json, Value};
 #[derive(Clone)]
 pub struct Chain {
     pub server: ServerKey,
+    pub origin: String,
     pub entries: Vec<Value>,
     prev: String,
 }
 
 impl Chain {
-    pub fn new(server: ServerKey) -> Self {
+    pub fn new(server: ServerKey, origin: impl Into<String>) -> Self {
         Self {
             server,
+            origin: origin.into(),
             entries: Vec::new(),
             prev: zero_hash(),
         }
     }
 
-    pub fn from_entries(server: ServerKey, entries: Vec<Value>) -> anyhow::Result<Self> {
+    pub fn from_entries(
+        server: ServerKey,
+        origin: impl Into<String>,
+        entries: Vec<Value>,
+    ) -> anyhow::Result<Self> {
         let mut prev = zero_hash();
         for (i, entry) in entries.iter().enumerate() {
             let seq = entry
@@ -57,6 +63,7 @@ impl Chain {
         }
         Ok(Self {
             server,
+            origin: origin.into(),
             entries,
             prev,
         })
@@ -84,7 +91,7 @@ impl Chain {
     }
 
     pub fn append_server(&mut self, kind: &str, purpose: &str, payload: Value) -> Value {
-        let domain_v = domain(purpose);
+        let domain_v = domain(&self.origin, purpose);
         let signature = self.server.sign(&domain_v, &payload);
         let kid = self.server.kid.clone();
         self.finish(kind, "server", &kid, domain_v, payload, signature, now_ms())
@@ -186,7 +193,7 @@ mod tests {
     #[test]
     fn chain_links_and_acks() {
         let server = ServerKey::generate();
-        let mut chain = Chain::new(server.clone());
+        let mut chain = Chain::new(server.clone(), "agent.idou.bid");
         let genesis = chain.append_server(
             "genesis",
             "genesis",
@@ -199,7 +206,8 @@ mod tests {
         );
         assert_eq!(genesis["seq"], 0);
         assert_eq!(genesis["prev_hash"], "0".repeat(64));
-        let again = Chain::from_entries(server.clone(), chain.entries.clone()).unwrap();
+        let again =
+            Chain::from_entries(server.clone(), "agent.idou.bid", chain.entries.clone()).unwrap();
         assert_eq!(again.tip_hash(), chain.tip_hash());
         let ack = &genesis["server_ack"];
         let mut ack_domain = genesis["domain"].clone();

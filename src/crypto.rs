@@ -11,8 +11,35 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-pub const ORIGIN: &str = "arena.idou.top";
 pub const PREFIX: &[u8] = b"\x19AgentArena Signed Message:\n";
+
+/// Hostname of `PUBLIC_BASE_URL`, without userinfo or port.
+/// `https://agent.idou.bid` becomes `agent.idou.bid`.
+pub fn origin_host(public_base_url: &str) -> String {
+    let trimmed = public_base_url.trim().trim_end_matches('/');
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let hostport = authority.rsplit('@').next().unwrap_or(authority);
+    if let Some(rest) = hostport.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(rest).to_string()
+    } else {
+        hostport.split(':').next().unwrap_or(hostport).to_string()
+    }
+}
+
+pub fn materialize_sign_mjs(origin: &str) -> String {
+    include_str!("../skill/arena/scripts/sign.mjs").replace("agent.idou.bid", origin)
+}
+
+pub fn materialize_skill_md(origin: &str, public_base_url: &str) -> String {
+    let base = public_base_url.trim_end_matches('/');
+    include_str!("../skill/arena/SKILL.md")
+        .replace("https://agent.idou.bid", base)
+        .replace("agent.idou.bid", origin)
+}
 
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -86,11 +113,11 @@ pub fn kid_of(raw_pub: &[u8], prefix: &str) -> String {
     format!("{prefix}_{}", &b32[..20])
 }
 
-pub fn domain(purpose: &str) -> Value {
+pub fn domain(origin: &str, purpose: &str) -> Value {
     serde_json::json!({
         "chainless": true,
         "name": "AgentArena",
-        "origin": ORIGIN,
+        "origin": origin,
         "purpose": purpose,
         "version": "1"
     })
@@ -127,10 +154,10 @@ pub fn verify_value(public_b64: &str, domain_v: &Value, payload: &Value, sig_b64
     vk.verify(&signing_input(domain_v, payload), &sig).is_ok()
 }
 
-pub fn domain_ok(d: &Value, purpose: &str) -> bool {
+pub fn domain_ok(d: &Value, purpose: &str, origin: &str) -> bool {
     d.get("name").and_then(|v| v.as_str()) == Some("AgentArena")
         && d.get("version").and_then(|v| v.as_str()) == Some("1")
-        && d.get("origin").and_then(|v| v.as_str()) == Some(ORIGIN)
+        && d.get("origin").and_then(|v| v.as_str()) == Some(origin)
         && d.get("purpose").and_then(|v| v.as_str()) == Some(purpose)
         && d.get("chainless") == Some(&Value::Bool(true))
 }
@@ -221,13 +248,25 @@ mod tests {
     fn sign_then_verify() {
         let sk = SigningKey::generate(&mut OsRng);
         let key = ServerKey::from_signing(sk);
-        let d = domain("move");
+        let d = domain("agent.idou.bid", "move");
         let p = json!({"match_id": "m", "seat": 0, "seq": 1});
         let sig = key.sign(&d, &p);
         assert!(verify_value(&key.public_b64, &d, &p, &sig));
         let mut tampered = p.clone();
         tampered["seat"] = json!(1);
         assert!(!verify_value(&key.public_b64, &d, &tampered, &sig));
+    }
+
+    #[test]
+    fn origin_host_strips_scheme_port_and_user() {
+        assert_eq!(origin_host("https://agent.idou.bid"), "agent.idou.bid");
+        assert_eq!(origin_host("https://agent.idou.bid/"), "agent.idou.bid");
+        assert_eq!(origin_host("http://127.0.0.1:18480"), "127.0.0.1");
+        assert_eq!(
+            origin_host("https://user:pass@agent.idou.bid:443/mcp"),
+            "agent.idou.bid"
+        );
+        assert_eq!(origin_host("http://[::1]:8080"), "::1");
     }
 
     #[test]

@@ -59,8 +59,12 @@ export function Layout() {
             </Button>
             {user ? (
               <>
-                <Button variant="outline" onClick={() => navigate("/agents")}>
-                  {user.handle}
+                <Button variant="outline" className="gap-2 px-2.5" onClick={() => navigate("/agents")}>
+                  <span className="grid size-5 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                    {user.handle.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="max-w-24 truncate font-data text-xs text-muted-foreground">{user.handle}</span>
+                  <span>我的智能体</span>
                 </Button>
                 <Button
                   variant="ghost"

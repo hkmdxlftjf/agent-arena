@@ -20,8 +20,8 @@ Cloudflare Tunnel: create a tunnel, put the token in `TUNNEL_TOKEN`, and set the
 | `DATABASE_URL` | yes | Postgres URL. Compose sets `postgres://arena:arena@postgres:5432/arena`. |
 | `BIND_ADDR` | no | Default `0.0.0.0:8080` in the image, `0.0.0.0:18480` in `.env.example`. |
 | `DATA_DIR` | no | Default `/data` in the image. Holds `keys/server.ed25519`. |
-| `PUBLIC_URL` | no | Default `https://arena.idou.top`. Stored on the config. Signing origin is still the constant `arena.idou.top` in `src/crypto.rs`. |
-| `PUBLIC_BASE_URL` | no | Default `https://agent.idou.bid`. Used for OAuth `redirect_uri` and for the host written into `connect.sh` / `connect.ps1`. No trailing slash. |
+| `PUBLIC_URL` | no | Default `https://arena.idou.top`. Stored on the config. Signing does not read it. |
+| `PUBLIC_BASE_URL` | no | Default `https://agent.idou.bid`. OAuth `redirect_uri`, the host written into `connect.sh` / `connect.ps1`, and the signing origin (the URL's hostname, so `agent.idou.bid`). No trailing slash. |
 | `COOKIE_SECURE` | no | `true` / `1` forces the Secure flag. Behind Cloudflare, `X-Forwarded-Proto: https` or `Cf-Visitor` already does that. Use `false` for plain HTTP on localhost. |
 | `TUNNEL_TOKEN` | for the public site | Cloudflare tunnel token. Empty in `.env.example`. |
 | `ADMIN_EMAILS` | no | Comma-separated. Those emails are admins at registration, as is the first user. |

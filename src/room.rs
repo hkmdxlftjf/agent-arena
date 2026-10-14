@@ -190,6 +190,7 @@ pub async fn spawn_room(
     server: ServerKey,
     hub: &Hub,
     id: Uuid,
+    origin: String,
 ) -> anyhow::Result<()> {
     let slot = hub.slot(id);
     let rx = {
@@ -204,6 +205,7 @@ pub async fn spawn_room(
     let engine = match Engine::begin(
         pool.clone(),
         server,
+        origin,
         id,
         slot.notify.clone(),
         slot.events.clone(),
@@ -231,12 +233,13 @@ impl Engine {
     async fn begin(
         pool: PgPool,
         server: ServerKey,
+        origin: String,
         id: Uuid,
         notify: Arc<Notify>,
         events: broadcast::Sender<String>,
         viewers: Arc<AtomicUsize>,
     ) -> anyhow::Result<Self> {
-        let mut engine = Self::read(pool, server, id, notify, events, viewers).await?;
+        let mut engine = Self::read(pool, server, origin, id, notify, events, viewers).await?;
         if engine.status == "running" && engine.chain.entries.is_empty() {
             engine.open_genesis().await?;
         }
@@ -248,11 +251,17 @@ impl Engine {
         Ok(engine)
     }
 
-    pub async fn read_public(pool: PgPool, server: ServerKey, id: Uuid) -> anyhow::Result<Value> {
+    pub async fn read_public(
+        pool: PgPool,
+        server: ServerKey,
+        origin: String,
+        id: Uuid,
+    ) -> anyhow::Result<Value> {
         let (events, _) = broadcast::channel(1);
         let engine = Self::read(
             pool,
             server,
+            origin,
             id,
             Arc::new(Notify::new()),
             events,
@@ -265,6 +274,7 @@ impl Engine {
     async fn read(
         pool: PgPool,
         server: ServerKey,
+        origin: String,
         id: Uuid,
         notify: Arc<Notify>,
         events: broadcast::Sender<String>,
@@ -330,7 +340,7 @@ impl Engine {
         for line in lines {
             entries.push(serde_json::from_str(&line)?);
         }
-        let chain = Chain::from_entries(server, entries)?;
+        let chain = Chain::from_entries(server, origin, entries)?;
         let persisted = chain.entries.len();
         let decisions = match &row.open_decisions {
             Some(Value::Array(_)) => serde_json::from_value(row.open_decisions.clone().unwrap())?,
@@ -901,10 +911,13 @@ impl Engine {
                 json!({}),
             );
         }
-        if !domain_ok(&domain_v, "move") {
+        if !domain_ok(&domain_v, "move", &self.chain.origin) {
             return self.nack(
                 "domain_mismatch",
-                "domain 必须是 AgentArena v1 / arena.idou.top / purpose=move",
+                format!(
+                    "domain 必须是 AgentArena v1 / {} / purpose=move",
+                    self.chain.origin
+                ),
                 Some(player_seat),
                 &payload,
                 json!({}),
@@ -1294,7 +1307,7 @@ impl Engine {
             "received_at": received_at,
             "seat": seat,
         });
-        let d = domain("nack");
+        let d = domain(&self.chain.origin, "nack");
         let sig = self.chain.server.sign(&d, &nack_payload);
         tracing::info!(code, seat, match_id = %self.match_id, "move rejected");
         let pool = self.pool.clone();
@@ -1541,7 +1554,7 @@ impl Engine {
                 let remaining = (d.deadline_at - now_ms()).max(0);
                 body["remaining_ms"] = json!(remaining);
                 body["signing_request"] = json!({
-                    "domain": domain("move"),
+                    "domain": domain(&self.chain.origin, "move"),
                     "payload": {
                         "v": 1,
                         "match_id": self.match_id.to_string(),
