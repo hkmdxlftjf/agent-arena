@@ -137,6 +137,7 @@ struct Player {
     forfeited: bool,
     last_seen: Option<DateTime<Utc>>,
     score: Option<f64>,
+    look: crate::cosmetics::SeatLook,
 }
 
 pub struct Engine {
@@ -216,6 +217,11 @@ struct PlayerRow {
     last_seen_at: Option<DateTime<Utc>>,
     handle: String,
     public_key_b64: Option<String>,
+    title: Option<String>,
+    color: String,
+    avatar_preset: String,
+    avatar_image: bool,
+    frame_id: Option<String>,
 }
 
 pub async fn spawn_room(
@@ -342,7 +348,7 @@ impl Engine {
         let prows = sqlx::query_as::<_, PlayerRow>(
             r#"SELECT mp.seat, mp.agent_id, mp.kid, mp.timeouts, mp.unseen_timeouts, mp.forfeited, mp.score,
                       a.name, a.allow_comments, a.model_label, a.last_seen_at, u.handle,
-                      k.public_key_b64
+                      k.public_key_b64, a.title, a.color, a.avatar_preset, a.avatar_image, a.frame_id
                FROM match_players mp
                JOIN agents a ON a.id = mp.agent_id
                JOIN users u ON u.id = mp.owner_id
@@ -354,24 +360,41 @@ impl Engine {
         .fetch_all(&pool)
         .await?;
 
-        let players = prows
+        let mut players: Vec<Player> = prows
             .into_iter()
-            .map(|p| Player {
-                seat: p.seat as i32,
-                agent_id: p.agent_id,
-                name: p.name,
-                handle: p.handle,
-                model_label: p.model_label,
-                allow_comments: p.allow_comments,
-                kid: p.kid.unwrap_or_default(),
-                public_b64: p.public_key_b64.unwrap_or_default(),
-                timeouts: p.timeouts,
-                unseen: p.unseen_timeouts,
-                forfeited: p.forfeited,
-                last_seen: p.last_seen_at,
-                score: p.score,
+            .map(|p| {
+                let appearance = crate::cosmetics::Appearance {
+                    title: p.title,
+                    color: p.color,
+                    avatar_preset: p.avatar_preset,
+                    avatar_image: p.avatar_image,
+                    frame_id: p.frame_id,
+                };
+                Player {
+                    seat: p.seat as i32,
+                    agent_id: p.agent_id,
+                    name: p.name,
+                    handle: p.handle,
+                    model_label: p.model_label,
+                    allow_comments: p.allow_comments,
+                    kid: p.kid.unwrap_or_default(),
+                    public_b64: p.public_key_b64.unwrap_or_default(),
+                    timeouts: p.timeouts,
+                    unseen: p.unseen_timeouts,
+                    forfeited: p.forfeited,
+                    last_seen: p.last_seen_at,
+                    score: p.score,
+                    look: crate::cosmetics::seat_look(&row.game_id, &appearance, None),
+                }
             })
             .collect();
+        let ids: Vec<Uuid> = players.iter().map(|p| p.agent_id).collect();
+        let equipped = crate::cosmetics::loadouts(&pool, &row.game_id, &ids).await?;
+        for player in &mut players {
+            if let Some(equip) = equipped.get(&player.agent_id) {
+                crate::cosmetics::overlay(&mut player.look, equip);
+            }
+        }
 
         let lines: Vec<String> = sqlx::query_scalar(
             "SELECT entry_line FROM match_events WHERE match_id = $1 ORDER BY seq",
@@ -1790,13 +1813,16 @@ impl Engine {
         let settling = self.chain.entries[self.persisted..]
             .iter()
             .any(|e| e["kind"] == "result");
-        if settling && self.mode == "ranked" && self.status == "finished" {
+        if settling && self.status == "finished" {
             let participants: Vec<(Uuid, f64)> = self
                 .players
                 .iter()
                 .map(|p| (p.agent_id, p.score.unwrap_or(0.0)))
                 .collect();
-            crate::rating::apply(&mut tx, self.match_id, &self.game_id, &participants).await?;
+            if self.mode == "ranked" {
+                crate::rating::apply(&mut tx, self.match_id, &self.game_id, &participants).await?;
+            }
+            crate::cosmetics::award(&mut tx, self.match_id, &self.game_id, &participants).await?;
         }
         tx.commit().await?;
         self.persisted = self.chain.entries.len();
@@ -1861,6 +1887,7 @@ impl Engine {
                     "forfeited": p.forfeited,
                     "role": role,
                     "allow_comments": p.allow_comments,
+                    "look": p.look.to_json(p.agent_id),
                 })
             })
             .collect();

@@ -1,3 +1,4 @@
+import { cardBackClass } from "@/cosmetics/skins"
 import { motion } from "framer-motion"
 import type { Trick } from "@/lib/types"
 
@@ -9,9 +10,9 @@ function face(card: string): { rank: string; suit: string; red: boolean } {
   return { rank, suit, red: card[1] === "h" || card[1] === "d" || card === "D" }
 }
 
-function PlayingCard({ card, hidden = false, index = 0 }: { card?: string; hidden?: boolean; index?: number }) {
+function PlayingCard({ card, hidden = false, index = 0, back }: { card?: string; hidden?: boolean; index?: number; back?: string | null }) {
   if (hidden || !card) {
-    return <span className="piece inline-block h-12 w-8 rounded-md border border-[#243038] bg-gradient-to-br from-[#3d4c55] to-[#243038]" />
+    return <span className={`piece inline-block h-12 w-8 rounded-md border ${cardBackClass(back)}`} />
   }
   const f = face(card)
   return (
@@ -27,12 +28,12 @@ function PlayingCard({ card, hidden = false, index = 0 }: { card?: string; hidde
   )
 }
 
-function Hand({ cards, count }: { cards: string[] | null | undefined; count: number }) {
+function Hand({ cards, count, back }: { cards: string[] | null | undefined; count: number; back?: string | null }) {
   if (!cards) {
     return (
       <div className="flex gap-1">
         {Array.from({ length: Math.min(count, 12) }, (_, i) => (
-          <PlayingCard key={i} hidden />
+          <PlayingCard key={i} hidden back={back} />
         ))}
         {count > 12 && <span className="self-center text-xs text-muted-foreground">×{count}</span>}
       </div>
@@ -74,6 +75,7 @@ export function CardTable({
   multiplier = 1,
   last,
   roles = ["甲", "乙", "丙"],
+  backs,
 }: {
   hands?: (string[] | null)[] | null
   counts?: number[]
@@ -84,6 +86,7 @@ export function CardTable({
   multiplier?: number
   last?: Trick | null
   roles?: string[]
+  backs?: (string | null | undefined)[]
 }) {
   const seats = [1, 2, 0]
   return (
@@ -100,7 +103,7 @@ export function CardTable({
             {landlord === seat ? " · 地主" : ""}
             {hands?.[seat] ? "" : ` · ${counts[seat] ?? 0} 张`}
           </p>
-          <Hand cards={hands?.[seat]} count={counts[seat] ?? 0} />
+          <Hand cards={hands?.[seat]} count={counts[seat] ?? 0} back={backs?.[seat]} />
         </div>
       ))}
       <div className="rounded-xl border border-dashed border-border p-3">

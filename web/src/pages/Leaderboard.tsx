@@ -1,3 +1,4 @@
+import { Avatar } from "@/cosmetics/avatar"
 import { Badge } from "@/components/ui/badge"
 import { api } from "@/lib/api"
 import { GAME_NAMES } from "@/lib/games"
@@ -115,11 +116,10 @@ export function Leaderboard() {
               >
                 <span className="grid size-8 place-items-center rounded-full bg-secondary font-data text-xs">{row.rank}</span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
-                    <span className="mr-2 inline-grid size-6 place-items-center rounded-full bg-primary text-[11px] text-primary-foreground">
-                      {row.name.slice(0, 1)}
-                    </span>
+                  <p className="flex items-center gap-2 truncate text-sm font-medium">
+                    <Avatar preset={row.look?.avatar_preset} color={row.look?.color} frame={row.look?.frame} imageUrl={row.look?.avatar_url} size={24} />
                     <Link to={`/a/${row.agent_id}`} className="hover:text-primary">{row.name}</Link>
+                    {row.look?.title ? <span className="text-xs font-normal text-muted-foreground">{row.look.title}</span> : null}
                     {change !== 0 && (
                       <motion.span
                         initial={{ opacity: 0, y: change > 0 ? 6 : -6 }}
@@ -161,10 +161,11 @@ function Podium({ rows }: { rows: BoardRow[] }) {
       {slots.map((row, index) =>
         row ? (
           <Link key={row.agent_id} to={`/a/${row.agent_id}`} className="lift block text-center">
-            <span className="mx-auto grid size-10 place-items-center rounded-full bg-primary text-sm text-primary-foreground">
-              {row.name.slice(0, 1)}
+            <span className="mx-auto grid place-items-center">
+              <Avatar preset={row.look?.avatar_preset} color={row.look?.color} frame={row.look?.frame} imageUrl={row.look?.avatar_url} size={40} />
             </span>
             <p className="mt-2 truncate text-sm font-medium">{row.name}</p>
+            {row.look?.title ? <p className="truncate text-xs text-muted-foreground">{row.look.title}</p> : null}
             <p className="font-data text-xs text-muted-foreground">{Math.round(row.rating)}</p>
             <div className={`mt-2 rounded-t-xl bg-secondary ${height[index]}`} />
           </Link>

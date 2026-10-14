@@ -3,6 +3,7 @@
 use crate::app::App;
 use crate::error::CallError;
 use axum::body::Body;
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode, Uri};
@@ -63,6 +64,17 @@ pub fn router(app: App) -> Router {
         .route("/api/leaderboard", get(leaderboard))
         .route("/api/users/{handle}", get(user_profile))
         .route("/api/agents/{id}/profile", get(agent_profile))
+        .route("/api/cosmetics", get(cosmetics_catalog))
+        .route(
+            "/api/agents/{id}/cosmetics",
+            get(agent_cosmetics).post(update_cosmetics),
+        )
+        .route(
+            "/api/agents/{id}/avatar",
+            post(upload_avatar).delete(clear_avatar),
+        )
+        .route("/api/me/unlocks", get(fresh_unlocks).post(ack_unlocks))
+        .route("/avatars/{file}", get(avatar_file))
         .route("/ws/leaderboard/{game}", get(ws_leaderboard))
         .route("/.well-known/arena-keys.json", get(keys_doc))
         .route("/.well-known/arena-skill.json", get(skill_doc))
@@ -382,6 +394,112 @@ async fn agent_profile(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, CallError> {
     Ok(Json(app.agent_profile(id).await?))
+}
+
+async fn cosmetics_catalog() -> Json<Value> {
+    Json(json!({
+        "items": crate::cosmetics::catalog_json(),
+        "presets": crate::cosmetics::presets_json(),
+    }))
+}
+
+async fn agent_cosmetics(
+    State(app): State<App>,
+    jar: CookieJar,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    crate::cosmetics::owned(app.pool(), user.id, id).await?;
+    Ok(Json(crate::cosmetics::profile(app.pool(), id).await?))
+}
+
+async fn update_cosmetics(
+    State(app): State<App>,
+    jar: CookieJar,
+    Path(id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    crate::cosmetics::owned(app.pool(), user.id, id).await?;
+    Ok(Json(
+        crate::cosmetics::update_profile(app.pool(), &app.config().data_dir, id, &body).await?,
+    ))
+}
+
+async fn upload_avatar(
+    State(app): State<App>,
+    jar: CookieJar,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    crate::cosmetics::owned(app.pool(), user.id, id).await?;
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    Ok(Json(
+        crate::cosmetics::save_avatar(app.pool(), &app.config().data_dir, id, content_type, &body)
+            .await?,
+    ))
+}
+
+async fn clear_avatar(
+    State(app): State<App>,
+    jar: CookieJar,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    crate::cosmetics::owned(app.pool(), user.id, id).await?;
+    Ok(Json(
+        crate::cosmetics::update_profile(
+            app.pool(),
+            &app.config().data_dir,
+            id,
+            &json!({"clear_avatar": true}),
+        )
+        .await?,
+    ))
+}
+
+async fn fresh_unlocks(State(app): State<App>, jar: CookieJar) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    Ok(Json(
+        crate::cosmetics::fresh_for_user(app.pool(), user.id).await?,
+    ))
+}
+
+async fn ack_unlocks(State(app): State<App>, jar: CookieJar) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    Ok(Json(
+        crate::cosmetics::ack_for_user(app.pool(), user.id).await?,
+    ))
+}
+
+async fn avatar_file(State(app): State<App>, Path(file): Path<String>) -> Response {
+    let Some(id) = file
+        .strip_suffix(".webp")
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+    else {
+        return CallError::new(404, "not_found", "没有这张头像").into_response();
+    };
+    let path = crate::cosmetics::avatar_path(&app.config().data_dir, id);
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let mut response = Response::new(Body::from(bytes));
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static("image/webp"),
+            );
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("public, max-age=3600"),
+            );
+            response
+        }
+        Err(_) => CallError::new(404, "not_found", "没有这张头像").into_response(),
+    }
 }
 
 async fn ws_leaderboard(

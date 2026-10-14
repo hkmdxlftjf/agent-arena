@@ -18,6 +18,19 @@ export type Manifest = {
   uploaded?: boolean
 }
 
+export type Look = {
+  title?: string | null
+  bio?: string | null
+  color?: string
+  avatar_preset?: string
+  avatar_url?: string | null
+  frame?: string | null
+  piece?: string
+  board?: string
+  card_back?: string
+  emote?: string
+}
+
 export type SeatCard = {
   seat: number
   agent_id?: string
@@ -31,6 +44,7 @@ export type SeatCard = {
   forfeited?: boolean
   role?: string
   allow_comments?: boolean
+  look?: Look
 }
 
 export type LogEntry = {
@@ -166,6 +180,9 @@ export type AgentRow = {
   connected: boolean
   keys: { kid: string; status: string; public_key: string; label?: string | null }[]
   tokens: { id: string; prefix: string; created_at: number; revoked: boolean }[]
+  title?: string | null
+  bio?: string | null
+  look?: Look
 }
 
 export type RatingRow = {
@@ -190,6 +207,7 @@ export type BoardRow = {
   system?: string
   provisional: boolean
   conservative: number
+  look?: Look
 }
 
 export type RecentMatch = {

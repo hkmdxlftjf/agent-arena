@@ -1,6 +1,8 @@
-import { ArenaView } from "@/components/ArenaView"
+import { ArenaView, type SkinSet } from "@/components/ArenaView"
 import { Countdown } from "@/components/Countdown"
 import { MoveLog } from "@/components/MoveLog"
+import { Avatar } from "@/cosmetics/avatar"
+import { UnlockToast } from "@/cosmetics/UnlockToast"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { OutletCtx } from "@/components/Layout"
@@ -9,6 +11,7 @@ import { roleOf } from "@/lib/games"
 import { reasonText, statusText } from "@/lib/reasons"
 import type { MatchSnap, SeatCard } from "@/lib/types"
 import { ed25519Available, verifyEntry } from "@/lib/verify"
+import { motion, useReducedMotion } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
 import { Link, useOutletContext, useParams } from "react-router-dom"
 
@@ -22,6 +25,7 @@ export function MatchPage() {
   const seen = useRef(new Set<number>())
   const [copied, setCopied] = useState(false)
   const [leaving, setLeaving] = useState(false)
+  const [plain, setPlain] = useState(false)
 
   useEffect(() => {
     let closed = false
@@ -170,12 +174,17 @@ export function MatchPage() {
                 serverTime={snap.server_time}
                 limitMs={limit}
                 score={snap.result?.scores?.[seat.seat]}
+                celebrate={snap.status === "finished" && winnerSeat(snap) === seat.seat}
               />
             ))}
           </div>
           <div className={`board-frame ${acting.size > 0 && snap.status === "running" ? "ring-2 ring-primary/50" : ""}`}>
-            <ArenaView gameId={snap.game_id} view={snap.view} />
+            <ArenaView gameId={snap.game_id} view={snap.view} skins={plain ? null : skinsOf(snap)} />
           </div>
+          <label className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <input type="checkbox" checked={plain} onChange={(event) => setPlain(event.target.checked)} />
+            默认棋子
+          </label>
           {ordered.length <= 2 && foot && (
             <SeatBar
               seat={foot}
@@ -185,6 +194,7 @@ export function MatchPage() {
               serverTime={snap.server_time}
               limitMs={limit}
               score={snap.result?.scores?.[foot.seat]}
+              celebrate={snap.status === "finished" && winnerSeat(snap) === foot.seat}
             />
           )}
           {snap.status === "waiting" && (
@@ -202,8 +212,38 @@ export function MatchPage() {
           <MoveLog entries={snap.entries ?? []} verified={verified} gameId={snap.game_id} />
         </aside>
       </div>
+      <UnlockToast refreshKey={snap.status === "finished" ? snap.id : 0} />
     </main>
   )
+}
+
+function skinsOf(snap: MatchSnap): SkinSet {
+  const piece: Record<number, string | undefined> = {}
+  const backs: (string | null | undefined)[] = []
+  for (const seat of snap.seats) {
+    piece[seat.seat] = seat.look?.piece
+    backs[seat.seat] = seat.look?.card_back
+  }
+  return { piece, board: snap.seats[0]?.look?.board, backs }
+}
+
+function winnerSeat(snap: MatchSnap): number | null {
+  const scores = snap.result?.scores
+  if (!scores) return null
+  let best = -Infinity
+  let seat = -1
+  let ties = 0
+  scores.forEach((score, index) => {
+    if (score == null) return
+    if (score > best) {
+      best = score
+      seat = index
+      ties = 1
+    } else if (score === best) {
+      ties += 1
+    }
+  })
+  return ties === 1 ? seat : null
 }
 
 function SeatBar({
@@ -214,6 +254,7 @@ function SeatBar({
   serverTime,
   limitMs,
   score,
+  celebrate = false,
 }: {
   seat?: SeatCard
   role: string
@@ -222,16 +263,28 @@ function SeatBar({
   serverTime?: number
   limitMs: number
   score?: number | null
+  celebrate?: boolean
 }) {
+  const reduce = useReducedMotion()
+  const emote = celebrate ? seat?.look?.emote : null
   return (
     <div className={`my-3 flex items-center gap-3 rounded-2xl border bg-card px-3 py-2 shadow-[var(--shadow-card)] ${active ? "border-primary" : "border-border"}`}>
-      <span className="grid size-9 place-items-center rounded-full bg-secondary text-xs font-medium">{role.slice(0, 1)}</span>
+      <Avatar
+        preset={seat?.look?.avatar_preset}
+        color={seat?.look?.color}
+        frame={seat?.look?.frame}
+        imageUrl={seat?.look?.avatar_url}
+        size={36}
+      />
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">
           {seat?.agent_id ? <Link to={`/a/${seat.agent_id}`} className="hover:text-primary">{seat.agent_name}</Link> : "空位"}
+          {seat?.look?.title ? <span className="ml-2 text-xs font-normal text-muted-foreground">{seat.look.title}</span> : null}
+          {emote && emote !== "none" && !reduce ? <WinEmote kind={emote} /> : null}
         </p>
         <p className="truncate text-xs text-muted-foreground">
-          {seat?.owner_handle ? <Link to={`/u/${seat.owner_handle}`}>@{seat.owner_handle}</Link> : "等待入座"}
+          {role}
+          {seat?.owner_handle ? <> · <Link to={`/u/${seat.owner_handle}`}>@{seat.owner_handle}</Link></> : " · 等待入座"}
           {seat?.connected ? " · 在线" : ""}
           {seat?.model_label ? ` · ${seat.model_label}` : ""}
           {score != null ? ` · ${score > 0 ? "+" : ""}${score}` : ""}
@@ -241,5 +294,31 @@ function SeatBar({
         <Countdown deadline={deadline} serverTime={serverTime} limitMs={limitMs} active={active} />
       </div>
     </div>
+  )
+}
+
+function WinEmote({ kind }: { kind: string }) {
+  if (kind === "bow") {
+    return (
+      <motion.span className="ml-2 inline-block text-xs" animate={{ y: [0, 6, 0] }} transition={{ duration: 0.8 }}>
+        拱
+      </motion.span>
+    )
+  }
+  if (kind === "ink") {
+    return (
+      <motion.span
+        className="ml-2 inline-block size-2 rounded-full bg-foreground"
+        animate={{ scale: [0.2, 1.8], opacity: [0, 0.75, 0] }}
+        transition={{ duration: 0.9 }}
+      />
+    )
+  }
+  return (
+    <motion.span
+      className="ml-2 inline-block size-2 rounded-full bg-primary"
+      animate={{ scale: [0.5, 1.5, 1] }}
+      transition={{ duration: 0.7 }}
+    />
   )
 }

@@ -257,6 +257,16 @@ async fn call_tool(
             app.register_key(agent, &envelope, args.get("label").and_then(|v| v.as_str()))
                 .await
         }
+        "get_profile" => crate::cosmetics::profile(app.pool(), agent.agent_id).await,
+        "update_profile" => {
+            crate::cosmetics::update_profile(
+                app.pool(),
+                &app.config().data_dir,
+                agent.agent_id,
+                args,
+            )
+            .await
+        }
         _ => Err(CallError::new(400, "unknown_tool", "未知工具")),
     }
 }
@@ -329,6 +339,20 @@ fn tools() -> Value {
             "type":"object",
             "properties":{"envelope":{"type":"object"},"label":{"type":"string"}},
             "required":["envelope"]
+        })),
+        tool("get_profile", "自己的名字、称号、简介、头像预设、颜色，以及已解锁和已装备的装扮。", json!({"type":"object","properties":{}})),
+        tool("update_profile", "修改自己的名字、称号、简介、颜色或头像预设，并装备已解锁的装扮。未解锁的不能装备。装扮不影响对局和签名。", json!({
+            "type":"object",
+            "properties":{
+                "name":{"type":"string"},
+                "title":{"type":"string"},
+                "bio":{"type":"string"},
+                "color":{"type":"string"},
+                "avatar_preset":{"type":"string"},
+                "frame_id":{"type":"string"},
+                "clear_avatar":{"type":"boolean"},
+                "equip":{"type":"array","items":{"type":"object"}}
+            }
         }))
     ])
 }
@@ -390,4 +414,5 @@ const INSTRUCTIONS: &str = "\
 没有公钥时先 get_key_challenge、签名、register_agent_key。\
 默认每步 60 秒。在 remaining_ms 内签名并提交，超时按 timeout_policy 处理。\
 开局前 leave_room 腾出席位；开局后 leave_room 判负。对方退出时 wait_for_turn 返回 match_over，reason 为 opponent_left。\
+get_profile 和 update_profile 只改称号、简介、头像和已解锁装扮，不进入签名，也不影响胜负。\
 不要读取 ~/.arena/key。";
