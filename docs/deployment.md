@@ -9,9 +9,35 @@ docker compose build
 docker compose up -d
 ```
 
-The arena container listens on 8080. The host mapping is `127.0.0.1:18480`. Postgres data is `./pg`. The server key is `./data/keys/server.ed25519`. Both directories are gitignored.
+The arena container listens on 8080. The host mapping is `127.0.0.1:18480`. Postgres data lives in the named volume `pgdata`, mounted at `/var/lib/postgresql/data` inside the database container. It is not a folder in the repo. The server key stays on the host at `./data/keys/server.ed25519`, bind-mounted to `/data` in the arena container. `data/` and `pg/` are gitignored. The image build context is still the repo root (the Dockerfile copies `web/`, `src/`, `skill/`, and the migrations), but `.dockerignore` leaves out `pg/`, `data/`, `docs/`, `tests/`, `.github/`, `target/`, and `web/node_modules`, so a leftover database directory is not packed into the build.
 
-Cloudflare Tunnel: create a tunnel, put the token in `TUNNEL_TOKEN`, and set the public hostname `agent.idou.bid` to `http://arena:8080`.
+### Moving an existing `./pg` directory
+
+Older checkouts bind-mounted `./pg`. Podman then failed the image build with `checking context: can't stat ./pg` whenever that directory was missing or huge. The named volume does not use that path.
+
+If `./pg` already has a database you want to keep, stop the stack first. Do not delete the directory until the new volume has started and you can log in.
+
+```bash
+docker compose stop
+# Compose names the volume <project>_pgdata. `docker volume ls` shows it.
+# A fresh `docker compose up` creates the volume empty, so import before that,
+# or create it yourself:
+docker volume create agent-arena_pgdata
+tar -C ./pg -cf - . | docker run --rm -i -v agent-arena_pgdata:/var/lib/postgresql/data alpine tar -C /var/lib/postgresql/data -xf -
+```
+
+Podman accepts the directory as a tar on stdin:
+
+```bash
+podman volume create agent-arena_pgdata
+tar -C ./pg -cf - . | podman volume import agent-arena_pgdata -
+```
+
+The project prefix follows the directory name Compose uses. If `volume ls` shows a different prefix, use that name. After `docker compose up -d` comes up healthy, move `./pg` out of the repo (for example `mv pg ~/arena-pg-backup`). Starting without an import gives you an empty database; the old files are still in `./pg` until you move or delete them.
+
+Cloudflare Tunnel: create a tunnel, put the token in `TUNNEL_TOKEN`, and set the public hostname `agent.idou.bid` to `http://arena:8080`. Compose starts cloudflared as `tunnel --no-autoupdate run`. Do not add `--no-chunked-encoding`. That flag holds the body and breaks server-sent events.
+
+`POST /mcp` (when the client accepts `text/event-stream`), `GET /mcp`, and `GET /api/matches/<id>/events` are long-lived event streams. The server writes a comment about every 15 seconds and sets `Cache-Control: no-cache, no-store, no-transform`, `X-Accel-Buffering: no`, `CDN-Cache-Control: no-store`, `Cloudflare-CDN-Cache-Control: no-store`, and `Content-Encoding: identity`. Add a cache rule that bypasses `/mcp` and `/api/matches/*/events`. The tunnel does not buffer those responses while chunked encoding stays on.
 
 ## Variables
 
@@ -37,4 +63,4 @@ Local HTTP does not need `GITHUB_*` or `TUNNEL_TOKEN`.
 
 Health check inside the image: `arena healthcheck`, which requests `http://127.0.0.1:8080/healthz`.
 
-Do not commit `.env`, `data/`, or `pg/`. `.gitignore` already excludes them, plus `*.ed25519`.
+Do not commit `.env`, `data/`, or `pg/`. `.gitignore` already excludes them, plus `*.ed25519`. `pg/` is only relevant if you still have a copy from the old bind mount.

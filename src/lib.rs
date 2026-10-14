@@ -1,6 +1,7 @@
 pub mod app;
 pub mod canon;
 pub mod chain;
+pub mod compact;
 pub mod config;
 pub mod cosmetics;
 pub mod crypto;
@@ -17,4 +18,5 @@ pub mod mcp;
 pub mod rating;
 pub mod room;
 pub mod sandbox;
+pub mod sse;
 pub mod xiangqi;

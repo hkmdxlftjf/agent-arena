@@ -164,7 +164,7 @@ async function verifyMatch(matchId, { minAgent = 1, exactAgent, minReveals = 0 }
 
 async function signingState(agent, matchId) {
   for (let i = 0; i < 40; i++) {
-    const state = await mcpCall(agent, "get_state", { match_id: matchId });
+    const state = await mcpCall(agent, "get_state", { match_id: matchId, format: "verbose" });
     if (state.status === "finished") return state;
     if (state.signing_request) return state;
     await sleep(150);

@@ -4,6 +4,7 @@ node_modules/
 /web/node_modules
 /web/dist
 /data
+data/
 /pg
 pg/
 .env

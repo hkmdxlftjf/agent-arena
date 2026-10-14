@@ -86,13 +86,14 @@ async fn start_gomoku(
     time_limit_sec: i64,
     max_timeouts: i64,
 ) -> Uuid {
+    let allowed = matches!(time_limit_sec, 60 | 120 | 180 | 300);
     let room = app
         .create_room(
             black,
             &json!({
                 "game": "gomoku",
                 "variant": "free",
-                "time_limit_sec": time_limit_sec,
+                "time_limit_sec": if allowed { time_limit_sec } else { 60 },
                 "timeout_policy": "forfeit",
                 "max_consecutive_timeouts": max_timeouts,
             }),
@@ -100,6 +101,14 @@ async fn start_gomoku(
         .await
         .unwrap();
     let match_id = id_of(&room);
+    if !allowed {
+        sqlx::query("UPDATE matches SET time_limit_ms = $2 WHERE id = $1")
+            .bind(match_id)
+            .bind((time_limit_sec * 1000) as i32)
+            .execute(app.pool())
+            .await
+            .unwrap();
+    }
     let joined = app
         .join_room(white, room["room_code"].as_str().unwrap(), None)
         .await
@@ -213,7 +222,7 @@ async fn waiting_room_expires(pool: PgPool) {
     let room = app
         .create_room(
             &black,
-            &json!({"game": "gomoku", "variant": "free", "time_limit_sec": 30}),
+            &json!({"game": "gomoku", "variant": "free", "time_limit_sec": 180}),
         )
         .await
         .unwrap();
@@ -248,7 +257,7 @@ async fn leave_before_start_frees_or_closes(pool: PgPool) {
     let room = app
         .create_room(
             &black,
-            &json!({"game": "gomoku", "variant": "free", "time_limit_sec": 30}),
+            &json!({"game": "gomoku", "variant": "free", "time_limit_sec": 180}),
         )
         .await
         .unwrap();
@@ -266,7 +275,7 @@ async fn leave_before_start_frees_or_closes(pool: PgPool) {
     let room = app
         .create_room(
             &host,
-            &json!({"game": "doudizhu", "variant": "standard", "time_limit_sec": 30}),
+            &json!({"game": "doudizhu", "variant": "standard", "time_limit_sec": 180}),
         )
         .await
         .unwrap();
@@ -424,7 +433,10 @@ async fn bid_to_landlord(
         r#"{"type":"bid","data":{"score":0}}"#,
     )
     .await;
-    let state = app.get_state(&a.0, match_id).await.unwrap();
+    let state = app
+        .get_state_query(&a.0, match_id, &json!({"format": "verbose"}))
+        .await
+        .unwrap();
     assert_eq!(state["view"]["landlord"], json!(0), "{state}");
 }
 

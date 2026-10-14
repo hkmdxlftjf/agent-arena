@@ -22,6 +22,28 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
+/// Casual rooms pick one of these per-action limits. Omitted means 180 seconds.
+pub const ACTION_LIMITS_SEC: [i64; 4] = [60, 120, 180, 300];
+pub const DEFAULT_ACTION_MS: i32 = 180_000;
+pub const RANKED_ACTION_MS: i32 = 180_000;
+
+fn action_limit_ms(body: &Value) -> Result<i32, CallError> {
+    let sec = match body.get("time_limit_sec") {
+        None | Some(Value::Null) => 180,
+        Some(value) => value.as_i64().ok_or_else(|| {
+            CallError::new(400, "invalid_time", "单步时限只能是 60、120、180 或 300 秒")
+        })?,
+    };
+    if !ACTION_LIMITS_SEC.contains(&sec) {
+        return Err(CallError::new(
+            400,
+            "invalid_time",
+            "单步时限只能是 60、120、180 或 300 秒",
+        ));
+    }
+    Ok((sec * 1000) as i32)
+}
+
 #[derive(Clone)]
 pub struct AgentCtx {
     pub agent_id: Uuid,
@@ -86,6 +108,21 @@ struct QueueRow {
     kid: String,
     rating: f64,
     enqueued_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+struct LiveRow {
+    id: Uuid,
+    game_id: String,
+    game_name: String,
+    status: String,
+    room_code: Option<String>,
+    variant: Option<String>,
+    tip_seq: Option<i32>,
+    state: Option<Value>,
+    time_limit_ms: i32,
+    created_at: DateTime<Utc>,
+    move_count: i64,
 }
 
 fn queue_lock() -> &'static tokio::sync::Mutex<()> {
@@ -188,6 +225,7 @@ impl App {
                 id,
                 self.signing_origin(),
                 self.match_limit_ms(),
+                self.room_wait_ms(),
             )
             .await
             {
@@ -1127,13 +1165,7 @@ impl App {
         if !manifest.variants.iter().any(|v| v.id == variant) {
             return Err(CallError::new(400, "bad_variant", "未知变体"));
         }
-        let time_limit_sec = body
-            .get("time_limit_sec")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(60);
-        if !(5..=600).contains(&time_limit_sec) {
-            return Err(CallError::new(400, "invalid_time", "单步时限需在 5–600 秒"));
-        }
+        let time_limit_ms = action_limit_ms(body)?;
         let policy = body
             .get("timeout_policy")
             .and_then(|v| v.as_str())
@@ -1183,7 +1215,7 @@ impl App {
         .bind(&variant)
         .bind(&code)
         .bind(agent.owner_id)
-        .bind((time_limit_sec * 1000) as i32)
+        .bind(time_limit_ms)
         .bind(policy)
         .bind(max_to as i32)
         .bind(allow_comments)
@@ -1211,7 +1243,50 @@ impl App {
             "game_id": game_id,
             "variant": variant,
             "status": "waiting",
+            "time_limit_sec": time_limit_ms / 1000,
         }))
+    }
+
+    pub async fn create_room_as_user(
+        &self,
+        user: &User,
+        agent_id: Uuid,
+        body: &Value,
+    ) -> Result<Value, CallError> {
+        let row = sqlx::query_as::<_, (String, bool)>(
+            "SELECT name, allow_comments FROM agents WHERE id = $1 AND owner_id = $2",
+        )
+        .bind(agent_id)
+        .bind(user.id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| CallError::new(404, "not_found", "没有这个智能体"))?;
+        let ctx = AgentCtx {
+            agent_id,
+            owner_id: user.id,
+            name: row.0,
+            allow_comments: row.1,
+            scopes: vec!["play".into()],
+            token_id: Uuid::nil(),
+        };
+        self.create_room(&ctx, body).await
+    }
+
+    pub async fn room_by_code(&self, code: &str) -> Result<Value, CallError> {
+        let code = code.trim().to_uppercase();
+        if code.is_empty() || code.len() > 12 || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(CallError::new(400, "bad_code", "房间码不对"));
+        }
+        let id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM matches WHERE room_code = $1")
+            .bind(&code)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?;
+        let Some(id) = id else {
+            return Err(CallError::new(404, "not_found", "找不到这个房间码"));
+        };
+        self.public_match(id).await
     }
 
     pub async fn join_room(
@@ -1302,6 +1377,7 @@ impl App {
                 match_id,
                 self.signing_origin(),
                 self.match_limit_ms(),
+                self.room_wait_ms(),
             )
             .await
             .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
@@ -1393,6 +1469,52 @@ impl App {
     }
 
     pub async fn get_state(&self, agent: &AgentCtx, match_id: Uuid) -> Result<Value, CallError> {
+        self.get_state_query(agent, match_id, &json!({})).await
+    }
+
+    pub async fn get_state_query(
+        &self,
+        agent: &AgentCtx,
+        match_id: Uuid,
+        args: &Value,
+    ) -> Result<Value, CallError> {
+        let opts = crate::compact::StateOpts::parse(args);
+        let full = self.raw_agent_view(agent, match_id).await?;
+        Ok(crate::compact::project(&full, &opts))
+    }
+
+    pub async fn get_legal_moves(
+        &self,
+        agent: &AgentCtx,
+        match_id: Uuid,
+        args: &Value,
+    ) -> Result<Value, CallError> {
+        let mut opts = crate::compact::StateOpts::parse(args);
+        opts.include_legal = true;
+        let full = self.raw_agent_view(agent, match_id).await?;
+        Ok(crate::compact::legal_page(&full, &opts))
+    }
+
+    pub async fn get_history(
+        &self,
+        agent: &AgentCtx,
+        match_id: Uuid,
+        args: &Value,
+    ) -> Result<Value, CallError> {
+        let from = args.get("from_move").and_then(|v| v.as_i64()).unwrap_or(0);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .min(200) as usize;
+        let full = self.raw_agent_view(agent, match_id).await?;
+        if full.get("error").is_some() {
+            return Ok(full);
+        }
+        Ok(crate::compact::history_page(&full, from, limit))
+    }
+
+    async fn raw_agent_view(&self, agent: &AgentCtx, match_id: Uuid) -> Result<Value, CallError> {
         self.touch(agent.agent_id).await;
         if let Some(tx) = self.inner.hub.sender(match_id) {
             return roundtrip(&tx, |reply| Cmd::Agent {
@@ -1406,6 +1528,7 @@ impl App {
             self.server().clone(),
             self.signing_origin(),
             match_id,
+            self.room_wait_ms(),
         )
         .await
         .map_err(|_| CallError::new(404, "not_found", "找不到这局"))?;
@@ -1430,6 +1553,11 @@ impl App {
         body["remaining_ms"] = json!(0);
         body["consecutive_timeouts"] = json!(0);
         Ok(body)
+    }
+
+    pub async fn peek_turn(&self, agent: &AgentCtx, match_id: Uuid) -> Result<Value, CallError> {
+        let view = self.get_state(agent, match_id).await?;
+        Ok(map_turn(&view))
     }
 
     pub async fn wait_for_turn(
@@ -1723,7 +1851,7 @@ impl App {
         .bind(game_id)
         .bind(variant)
         .bind(picked[0].owner_id)
-        .bind(manifest.default_time.per_action_ms as i32)
+        .bind(RANKED_ACTION_MS)
         .bind(manifest.timeout_policy.as_str())
         .bind(manifest.default_time.max_consecutive_timeouts as i32)
         .bind(&info.rules_hash)
@@ -1752,6 +1880,7 @@ impl App {
             match_id,
             self.signing_origin(),
             self.match_limit_ms(),
+            self.room_wait_ms(),
         )
         .await?;
         Ok(())
@@ -1921,6 +2050,7 @@ impl App {
                 match_id,
                 self.signing_origin(),
                 self.match_limit_ms(),
+                self.room_wait_ms(),
             )
             .await
             .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
@@ -1930,6 +2060,10 @@ impl App {
 
     fn match_limit_ms(&self) -> i64 {
         self.config().max_match_duration_ms()
+    }
+
+    fn room_wait_ms(&self) -> i64 {
+        self.config().room_wait_timeout_secs.saturating_mul(1000) as i64
     }
 
     pub async fn expire_waiting_rooms(&self) -> anyhow::Result<u64> {
@@ -2046,6 +2180,7 @@ impl App {
             self.server().clone(),
             self.signing_origin(),
             match_id,
+            self.room_wait_ms(),
         )
         .await
         .map_err(|_| CallError::new(404, "not_found", "找不到这局"))?;
@@ -2059,20 +2194,11 @@ impl App {
     }
 
     pub async fn list_live(&self) -> Result<Vec<Value>, CallError> {
-        let rows = sqlx::query_as::<
-            _,
-            (
-                Uuid,
-                String,
-                String,
-                String,
-                Option<String>,
-                Option<String>,
-                Option<i32>,
-                Option<Value>,
-            ),
-        >(
-            r#"SELECT m.id, m.game_id, g.name, m.status, m.room_code, m.variant, m.tip_seq, m.state
+        let rows = sqlx::query_as::<_, LiveRow>(
+            r#"SELECT m.id, m.game_id, g.name AS game_name, m.status, m.room_code, m.variant,
+                      m.tip_seq, m.state, m.time_limit_ms, m.created_at,
+                      (SELECT COUNT(*) FROM match_events e
+                        WHERE e.match_id = m.id AND e.kind = 'action') AS move_count
                FROM matches m JOIN games g ON g.id = m.game_id
                WHERE m.status IN ('waiting','running')
                ORDER BY m.created_at DESC
@@ -2081,8 +2207,32 @@ impl App {
         .fetch_all(self.pool())
         .await
         .map_err(db_err)?;
+        let server_time = now_ms();
+        let wait_ms = self.room_wait_ms();
         let mut out = Vec::new();
-        for (id, game_id, game_name, status, room_code, variant, tip_seq, state) in rows {
+        for row in rows {
+            let LiveRow {
+                id,
+                game_id,
+                game_name,
+                status,
+                room_code,
+                variant,
+                tip_seq,
+                state,
+                time_limit_ms,
+                created_at,
+                move_count,
+            } = row;
+            let max_players = registry()
+                .get(&game_id)
+                .map(|game| i64::from(game.manifest().max_players))
+                .unwrap_or(2);
+            let expires_at = if status == "waiting" {
+                json!(created_at.timestamp_millis() + wait_ms)
+            } else {
+                Value::Null
+            };
             let seats = sqlx::query_as::<_, (i16, Uuid, String, String, Option<String>, String, String, bool, Option<String>)>(
                 r#"SELECT mp.seat, a.id, a.name, u.handle, a.title, a.color, a.avatar_preset, a.avatar_image, a.frame_id
                    FROM match_players mp
@@ -2118,6 +2268,12 @@ impl App {
                 "room_code": room_code,
                 "variant": variant,
                 "tip_seq": tip_seq,
+                "time_limit_ms": time_limit_ms,
+                "max_players": max_players,
+                "move_count": move_count,
+                "created_at": created_at.timestamp_millis(),
+                "expires_at": expires_at,
+                "server_time": server_time,
                 "viewer_count": self.inner.hub.slot(id).viewers.load(std::sync::atomic::Ordering::Relaxed),
                 "seats": seats.into_iter().map(|(seat, agent_id, name, handle, title, color, preset, image, frame_id)| {
                     let appearance = crate::cosmetics::Appearance {
@@ -2240,19 +2396,59 @@ fn map_turn(view: &Value) -> Value {
     } else {
         Value::Null
     };
-    json!({
-        "status": turn_status,
-        "reason": reason,
-        "match_id": view.get("id").cloned().unwrap_or(Value::Null),
-        "phase": if over { "game_over" } else { phase },
-        "deadline_at": view.get("deadline_at").cloned().unwrap_or(Value::Null),
-        "remaining_ms": view.get("remaining_ms").cloned().unwrap_or(json!(0)),
-        "time_limit_ms": view.get("time_limit_ms").cloned().unwrap_or(json!(60000)),
-        "timeout_policy": view.get("timeout_policy").cloned().unwrap_or(Value::Null),
-        "consecutive_timeouts": view.get("consecutive_timeouts").cloned().unwrap_or(json!(0)),
-        "events_since": view.get("tip_seq").cloned().unwrap_or(json!(0)),
-        "to_act": view.get("to_act").cloned().unwrap_or(json!([])),
-    })
+    let mut out = view.clone();
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("match_status".into(), json!(status));
+        obj.insert("status".into(), json!(turn_status));
+        obj.insert("reason".into(), reason);
+        obj.insert(
+            "phase".into(),
+            json!(if over { "game_over" } else { phase }),
+        );
+        obj.insert(
+            "match_id".into(),
+            view.get("match_id")
+                .cloned()
+                .or_else(|| view.get("id").cloned())
+                .unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "deadline_at".into(),
+            view.get("deadline_at").cloned().unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "remaining_ms".into(),
+            view.get("remaining_ms").cloned().unwrap_or(json!(0)),
+        );
+        obj.insert(
+            "time_limit_ms".into(),
+            view.get("time_limit_ms")
+                .cloned()
+                .unwrap_or(json!(DEFAULT_ACTION_MS)),
+        );
+        obj.insert(
+            "timeout_policy".into(),
+            view.get("timeout_policy").cloned().unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "consecutive_timeouts".into(),
+            view.get("consecutive_timeouts")
+                .cloned()
+                .unwrap_or(json!(0)),
+        );
+        obj.insert(
+            "events_since".into(),
+            view.get("move_no")
+                .cloned()
+                .or_else(|| view.get("tip_seq").cloned())
+                .unwrap_or(json!(0)),
+        );
+        obj.insert(
+            "to_act".into(),
+            view.get("to_act").cloned().unwrap_or(json!([])),
+        );
+    }
+    out
 }
 
 async fn bootstrap_games(pool: &PgPool) -> anyhow::Result<HashMap<String, GameInfo>> {

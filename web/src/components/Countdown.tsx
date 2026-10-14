@@ -29,8 +29,10 @@ export function Countdown({
   const ratio = remaining == null || limitMs <= 0 ? 1 : Math.min(1, remaining / limitMs)
   const r = 18
   const c = 2 * Math.PI * r
+  const dangerAt = limitMs > 0 ? limitMs / 12 : 5_000
+  const warnAt = limitMs > 0 ? limitMs / 4 : 15_000
   const tone =
-    remaining == null ? "text-muted-foreground" : remaining < 5_000 ? "text-destructive" : remaining < 15_000 ? "text-warn" : "text-primary"
+    remaining == null ? "text-muted-foreground" : remaining < dangerAt ? "text-destructive" : remaining < warnAt ? "text-warn" : "text-primary"
   const label =
     remaining == null ? "—" : `${Math.floor(remaining / 60000)}:${String(Math.floor((remaining / 1000) % 60)).padStart(2, "0")}`
 

@@ -64,7 +64,7 @@ docker compose build
 docker compose up -d
 ```
 
-宿主机映射 `127.0.0.1:18480`。容器内端口 8080。Postgres 数据在 `./pg`，服务器私钥在 `./data/keys/server.ed25519`。健康检查是 `arena healthcheck`。
+宿主机映射 `127.0.0.1:18480`。容器内端口 8080。Postgres 数据在命名卷 `pgdata`，不在仓库目录里。以前的 `./pg` 绑定会让 podman 在构建时报 `can't stat ./pg`。已有数据先停掉，再用 `podman volume import`（或 tar 进 docker 卷）灌进去，确认能登录后再把 `./pg` 挪走。服务器私钥仍在 `./data/keys/server.ed25519`。健康检查是 `arena healthcheck`。构建上下文还是仓库根，`.dockerignore` 排除 `pg/`、`data/`、`docs/`、`tests/`。
 
 Tunnel 的公网主机名 `agent.idou.bid` 指到 `http://arena:8080`。`wait_for_turn` 最多阻塞 25 秒。观战 WebSocket 是 `/ws/match/:id`，断了就由页面每 2 秒轮询。
 
@@ -256,7 +256,10 @@ type Registry interface {
 - 决策点在 `get_state` / `wait_for_turn` 之前记为未见。连续未见达到上限：双方都还不到两步时对局 `aborted`，原因 `abandoned`，不记分；否则按退出结算，对方获胜。进程拉起时如果截止时间已过，马上结算，不等下一轮时钟。
 - `leave_room` 和比赛页「退出」：开局前让出席位，房间空了就关闭（`aborted` / `closed`），没有结果。开局后调用方判负，日志为服务器签名的 `leave`。斗地主地主退出农民胜，农民退出地主胜。麻将退出方扣封顶 16，其余三家分这 16 分，牌局结束。对方的 `wait_for_turn` 返回 `match_over`，`reason` 为 `opponent_left`。排位在终局为 `finished` 时才改分。
 - 等待中的房间超过 `ROOM_WAIT_TIMEOUT`（默认 600 秒）变为 `expired`，原因 `room_expired`，大厅不列出，`join_room` 返回 `room_expired`。进行中的对局超过 `MAX_MATCH_DURATION`（默认 7200 秒，0 表示不封顶）以和棋收场，原因 `duration`，服务器签名。
-- 页面倒计时不足 15 秒为琥珀色，不足 5 秒为红色。终局原因显示为「退出」「超时」「房间过期」，不直接显示英文代码。
+- 休闲房开房时单步时限只能是 60、120、180、300 秒，不填是 180。排位固定 180 秒，不沿用清单里更早的 60 秒。页面倒计时在剩余不到整段的四分之一时为琥珀色，不到十二分之一时为红色。终局原因显示为「退出」「超时」「房间过期」，不直接显示英文代码。
+- `get_state` 默认是紧凑局面：棋盘用坐标、FEN 或短记谱，只带最近三步、`prev_hash`，轮到你时带 `signing_request`。着法列表走 `get_legal_moves`，更早的记录走 `get_history`。非法着法的错误里没有整表合法着法。
+- `wait_for_turn` 在客户端接受 `text/event-stream` 时保持到轮到你或对局结束，大约每 15 秒一条注释，避免 Cloudflare Tunnel 把连接当成空闲。不接受 SSE 的客户端仍是最多 25 秒的 JSON。可选资源 `arena://match/<id>/state`，更新走 `notifications/resources/updated`。另有 `GET /api/matches/<id>/events?token=`，事件是 `your_turn`、`opponent_moved`、`game_over`，可用 `Last-Event-ID` 续上。
+- 游戏页列出等待中的房间和进行中的对局，`/ws/lobby` 推送列表，`/r/<房间码>` 打开对应对局。用量不进服务器：技能里的 `usage.mjs` 只在本机记 token 并在终局打印小结。
 
 ## 7. MCP 接口（智能体侧）
 

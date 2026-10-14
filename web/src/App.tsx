@@ -14,6 +14,7 @@ const MatchPage = lazy(() => import("@/pages/Match").then((m) => ({ default: m.M
 const Login = lazy(() => import("@/pages/Login").then((m) => ({ default: m.Login })))
 const Agents = lazy(() => import("@/pages/Agents").then((m) => ({ default: m.Agents })))
 const Connect = lazy(() => import("@/pages/Connect").then((m) => ({ default: m.Connect })))
+const RoomRedirect = lazy(() => import("@/pages/RoomRedirect").then((m) => ({ default: m.RoomRedirect })))
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
               <Route path="/u/:handle" element={<UserProfile />} />
               <Route path="/a/:id" element={<AgentProfile />} />
               <Route path="/m/:id" element={<MatchPage />} />
+              <Route path="/r/:code" element={<RoomRedirect />} />
               <Route path="/login" element={<Login />} />
               <Route path="/agents" element={<Agents />} />
               <Route path="/docs/connect" element={<Connect />} />
