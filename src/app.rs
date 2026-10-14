@@ -26,6 +26,8 @@ use uuid::Uuid;
 pub const ACTION_LIMITS_SEC: [i64; 4] = [60, 120, 180, 300];
 pub const DEFAULT_ACTION_MS: i32 = 180_000;
 pub const RANKED_ACTION_MS: i32 = 180_000;
+/// A queue row with no `queue_status`, `wait_for_turn`, or `ping` in this long is dropped.
+const QUEUE_LEASE: &str = "5 minutes";
 
 fn action_limit_ms(body: &Value) -> Result<i32, CallError> {
     let sec = match body.get("time_limit_sec") {
@@ -197,6 +199,11 @@ impl App {
             }),
         };
         app.recover().await;
+        match app.expire_queue().await {
+            Ok(n) if n > 0 => tracing::info!(expired = n, "removed stale queue entries"),
+            Ok(_) => {}
+            Err(err) => tracing::warn!(error = %err.message, "queue cleanup"),
+        }
         let matcher = app.clone();
         tokio::spawn(async move {
             loop {
@@ -1196,7 +1203,6 @@ impl App {
             .resolve_key(agent, body.get("kid").and_then(|v| v.as_str()))
             .await?;
         self.ensure_free(agent).await?;
-        self.ensure_not_queued(agent).await?;
         let match_id = Uuid::new_v4();
         let code = self.unique_code().await?;
         let mut tx = self.pool().begin().await.map_err(db_err)?;
@@ -1224,6 +1230,11 @@ impl App {
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+        sqlx::query("DELETE FROM match_queue WHERE agent_id = $1")
+            .bind(agent.agent_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
         sqlx::query(
             "INSERT INTO match_players (match_id, seat, agent_id, owner_id, kid) VALUES ($1, 0, $2, $3, $4)",
         )
@@ -1298,7 +1309,6 @@ impl App {
         let code = code.trim().to_uppercase();
         let kid = self.resolve_key(agent, kid).await?;
         self.ensure_free(agent).await?;
-        self.ensure_not_queued(agent).await?;
         let mut tx = self.pool().begin().await.map_err(db_err)?;
         let row = sqlx::query_as::<_, (Uuid, String, String, String, i64)>(
             r#"SELECT m.id, m.status, m.game_id, m.mode,
@@ -1351,6 +1361,11 @@ impl App {
             }
         }
         let seat = n as i16;
+        sqlx::query("DELETE FROM match_queue WHERE agent_id = $1")
+            .bind(agent.agent_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
         sqlx::query("INSERT INTO match_players (match_id, seat, agent_id, owner_id, kid) VALUES ($1, $2, $3, $4, $5)")
             .bind(match_id)
             .bind(seat)
@@ -1410,19 +1425,6 @@ impl App {
         .await
         .map_err(db_err)?;
         kid.ok_or_else(|| CallError::new(400, "no_key", "先注册签名公钥，才能入座"))
-    }
-
-    async fn ensure_not_queued(&self, agent: &AgentCtx) -> Result<(), CallError> {
-        let queued: Option<Uuid> =
-            sqlx::query_scalar("SELECT id FROM match_queue WHERE agent_id = $1")
-                .bind(agent.agent_id)
-                .fetch_optional(self.pool())
-                .await
-                .map_err(db_err)?;
-        if queued.is_some() {
-            return Err(CallError::new(409, "queued", "这个智能体正在排位队列里"));
-        }
-        Ok(())
     }
 
     async fn ensure_free(&self, agent: &AgentCtx) -> Result<(), CallError> {
@@ -1565,6 +1567,7 @@ impl App {
         agent: &AgentCtx,
         match_id: Uuid,
     ) -> Result<Value, CallError> {
+        let _ = self.heartbeat_queue(agent.agent_id).await;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(25);
         loop {
             let slot = self.inner.hub.slot(match_id);
@@ -1675,10 +1678,10 @@ impl App {
         let rating = self.display_rating(agent.agent_id, game_id).await?;
         let id = Uuid::new_v4();
         sqlx::query(
-            r#"INSERT INTO match_queue (id, agent_id, owner_id, game_id, variant, kid, rating)
-               VALUES ($1,$2,$3,$4,$5,$6,$7)
+            r#"INSERT INTO match_queue (id, agent_id, owner_id, game_id, variant, kid, rating, last_seen_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7, now())
                ON CONFLICT (agent_id) DO UPDATE SET game_id = EXCLUDED.game_id, variant = EXCLUDED.variant,
-                 kid = EXCLUDED.kid, rating = EXCLUDED.rating, enqueued_at = now()"#,
+                 kid = EXCLUDED.kid, rating = EXCLUDED.rating, enqueued_at = now(), last_seen_at = now()"#,
         )
         .bind(id)
         .bind(agent.agent_id)
@@ -1699,14 +1702,76 @@ impl App {
         Ok(json!({"status": "queued", "game_id": game_id, "variant": variant, "rating": rating}))
     }
 
+    /// Drop queue rows that have not been refreshed inside [`QUEUE_LEASE`].
+    pub async fn expire_queue(&self) -> Result<u64, CallError> {
+        let result =
+            sqlx::query("DELETE FROM match_queue WHERE last_seen_at < now() - $1::interval")
+                .bind(QUEUE_LEASE)
+                .execute(self.pool())
+                .await
+                .map_err(db_err)?;
+        Ok(result.rows_affected())
+    }
+
+    /// Refresh a still-valid queue lease. A stale row is left for [`Self::expire_queue`].
+    pub async fn heartbeat_queue(&self, agent_id: Uuid) -> Result<(), CallError> {
+        sqlx::query(
+            "UPDATE match_queue SET last_seen_at = now() WHERE agent_id = $1 AND last_seen_at >= now() - $2::interval",
+        )
+        .bind(agent_id)
+        .bind(QUEUE_LEASE)
+        .execute(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    pub async fn dequeue(&self, agent_id: Uuid) -> Result<bool, CallError> {
+        let result = sqlx::query("DELETE FROM match_queue WHERE agent_id = $1")
+            .bind(agent_id)
+            .execute(self.pool())
+            .await
+            .map_err(db_err)?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn leave_queue(&self, agent: &AgentCtx) -> Result<Value, CallError> {
+        let left = self.dequeue(agent.agent_id).await?;
+        Ok(json!({"status": "idle", "left": left}))
+    }
+
+    /// Queue status for `get_profile`. Reading it does not extend the lease.
+    pub async fn queue_snapshot(&self, agent_id: Uuid) -> Result<Value, CallError> {
+        self.expire_queue().await?;
+        if let Some(found) = self.ranked_seat(agent_id).await? {
+            return Ok(found);
+        }
+        self.queue_row(agent_id).await
+    }
+
+    pub async fn mcp_profile(&self, agent: &AgentCtx) -> Result<Value, CallError> {
+        let mut doc = crate::cosmetics::profile(self.pool(), agent.agent_id).await?;
+        let queue = self.queue_snapshot(agent.agent_id).await?;
+        if let Some(map) = doc.as_object_mut() {
+            map.insert("queue".to_string(), queue);
+        }
+        Ok(doc)
+    }
+
     pub async fn queue_status(&self, agent: &AgentCtx) -> Result<Value, CallError> {
+        self.expire_queue().await?;
         if let Some(found) = self.ranked_seat(agent.agent_id).await? {
             return Ok(found);
         }
+        self.heartbeat_queue(agent.agent_id).await?;
+        self.queue_row(agent.agent_id).await
+    }
+
+    async fn queue_row(&self, agent_id: Uuid) -> Result<Value, CallError> {
         let row = sqlx::query_as::<_, (String, String, f64, chrono::DateTime<Utc>)>(
             "SELECT game_id, variant, rating, enqueued_at FROM match_queue WHERE agent_id = $1",
         )
-        .bind(agent.agent_id)
+        .bind(agent_id)
         .fetch_optional(self.pool())
         .await
         .map_err(db_err)?;
@@ -1750,6 +1815,9 @@ impl App {
 
     pub async fn matchmake_once(&self) -> anyhow::Result<()> {
         let _guard = queue_lock().lock().await;
+        self.expire_queue()
+            .await
+            .map_err(|err| anyhow::anyhow!(err.message))?;
         let rows = sqlx::query_as::<_, QueueRow>(
             r#"SELECT id, agent_id, owner_id, game_id, variant, kid, rating, enqueued_at
                FROM match_queue ORDER BY enqueued_at"#,

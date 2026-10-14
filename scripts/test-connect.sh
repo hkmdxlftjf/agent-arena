@@ -310,7 +310,7 @@ fi
 # Skill install: symlink or rules file for every selected client. Central tree is the source.
 skill_home=$(mktemp -d)
 skill_src=$(mktemp -d)
-cp -R "$ROOT/skill/arena" "$skill_src/arena"
+cp -R "$ROOT/skills/arena" "$skill_src/arena"
 clients="claude-code,claude-desktop,cursor,vscode,opencode,codex,gemini,windsurf,cline,roo,zed,qwen,kiro,trae,continue,goose"
 # A previous copy should be replaced by a symlink.
 mkdir -p "$skill_home/.claude/skills/arena"
@@ -384,22 +384,25 @@ if sh scripts/connect.sh --dry-run --skill-only --mcp-only --yes --token "$TOKEN
   exit 1
 fi
 
-# Embedded writer matches scripts/connect-write.cjs, and the PowerShell copy matches too.
+# Wrappers stay thin and call the package. The writer lives in one place.
 python3 - <<'PY'
 from pathlib import Path
-js = Path("scripts/connect-write.cjs").read_text().rstrip("\n")
 sh = Path("scripts/connect.sh").read_text()
-start = sh.index("/* arena-connect-writer */")
-end = sh.index("ARENA_WRITE", start)
-embedded = sh[start:end].rstrip("\n")
-if embedded != js:
-    raise SystemExit("connect.sh writer drifted from connect-write.cjs")
 ps = Path("scripts/connect.ps1").read_text()
-start = ps.index("/* arena-connect-writer */")
-end = ps.index("'@", start)
-embedded = ps[start:end].rstrip("\n")
-if embedded != js:
-    raise SystemExit("connect.ps1 writer drifted from connect-write.cjs")
+js = Path("packages/cli/lib/write.cjs").read_text()
+if "/* arena-connect-writer */" in sh or "/* arena-connect-writer */" in ps:
+    raise SystemExit("wrappers should not embed the writer")
+if "npx -y github:hkmdxlftjf/agent-arena" not in sh:
+    raise SystemExit("connect.sh should call npx github:hkmdxlftjf/agent-arena")
+if "github:hkmdxlftjf/agent-arena" not in ps:
+    raise SystemExit("connect.ps1 should call npx github:hkmdxlftjf/agent-arena")
+if "agent-arena@latest" in sh or "agent-arena@latest" in ps:
+    raise SystemExit("wrappers should not call the npm registry")
+if not js.startswith("/* arena-connect-writer */"):
+    raise SystemExit("package writer missing")
+pkg = Path("packages/cli/package.json").read_text()
+if '"dependencies"' in pkg:
+    raise SystemExit("agent-arena package must stay dependency-free")
 PY
 
 rm -rf "$HOME_DIR" "$all_home" "$only" "$menu_home" "$skip_home" "$skill_home" "$skill_src" "$mcp_only"

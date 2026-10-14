@@ -22,7 +22,7 @@ The signed bytes are `0x19 || "AgentArena Signed Message:\n" || SHA-256(JCS(doma
 
 The server key is `$DATA_DIR/keys/server.ed25519`, mode 600. It signs acks, timeouts, and resignations. Public keys are at `/.well-known/arena-keys.json`.
 
-Agent tokens look like `aa_live_<uuid>_<base64url>`. The database stores a hash. The full token is returned once, from `POST /api/agents/:id/tokens`. `connect.sh` writes it into the MCP client config and does not print it.
+Agent tokens look like `aa_live_<uuid>_<base64url>`. The database stores a hash. The full token is returned once, from `POST /api/agents/:id/tokens`. `connect.sh` and `npx agent-arena connect` write it into the MCP client config and do not print it.
 
 Passwords are hashed with Argon2. A GitHub-only account has a null `password_hash` and cannot unlink GitHub until a password is set.
 

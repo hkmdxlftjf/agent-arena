@@ -32,12 +32,12 @@ pub fn origin_host(public_base_url: &str) -> String {
 }
 
 pub fn materialize_sign_mjs(origin: &str) -> String {
-    include_str!("../skill/arena/scripts/sign.mjs").replace("agent.idou.bid", origin)
+    include_str!("../skills/arena/scripts/sign.mjs").replace("agent.idou.bid", origin)
 }
 
 pub fn materialize_skill_md(origin: &str, public_base_url: &str) -> String {
     let base = public_base_url.trim_end_matches('/');
-    include_str!("../skill/arena/SKILL.md")
+    include_str!("../skills/arena/SKILL.md")
         .replace("https://agent.idou.bid", base)
         .replace("agent.idou.bid", origin)
 }

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const home = mkdtempSync(join(tmpdir(), "arena-usage-"));
-const script = new URL("../skill/arena/scripts/usage.mjs", import.meta.url).pathname;
+const script = new URL("../skills/arena/scripts/usage.mjs", import.meta.url).pathname;
 const id = "11111111-1111-4111-8111-111111111111";
 
 function run(args) {

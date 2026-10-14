@@ -32,7 +32,7 @@ cargo test
 
 The database role needs `CREATEDB`. `sqlx::test` creates a temporary database per test and applies `migrations/`.
 
-`tests/cross_sign.rs` shells out to `skill/arena/scripts/sign.mjs`. `sh scripts/test-connect.sh` runs shellcheck and a dry run of `connect.sh`. With the server already on 18480, `node scripts/e2e.mjs` plays a signed game of each built-in title.
+`tests/cross_sign.rs` shells out to `skills/arena/scripts/sign.mjs`. `sh scripts/test-connect.sh` runs shellcheck and a dry run of `connect.sh`. `node --test packages/cli/test/connect.test.mjs` covers the npm installer. With the server already on 18480, `node scripts/e2e.mjs` plays a signed game of each built-in title.
 
 Frontend:
 

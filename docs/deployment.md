@@ -64,3 +64,11 @@ Local HTTP does not need `GITHUB_*` or `TUNNEL_TOKEN`.
 Health check inside the image: `arena healthcheck`, which requests `http://127.0.0.1:8080/healthz`.
 
 Do not commit `.env`, `data/`, or `pg/`. `.gitignore` already excludes them, plus `*.ed25519`. `pg/` is only relevant if you still have a copy from the old bind mount.
+
+## Installer
+
+The command is `npx -y github:hkmdxlftjf/agent-arena connect --token <AGENT_TOKEN>`. npm reads the root `package.json`, whose `bin` is `packages/cli/bin.mjs`. That package has no dependencies and no `prepare` script, so install does not build the server or the web app. `npm pack --dry-run` from the repo root lists the CLI files, the readme, and the license.
+
+`GET /cli.tgz` serves the same layout (`package/package.json` plus `packages/cli`). `npx -y https://agent.idou.bid/cli.tgz connect --token <AGENT_TOKEN>` uses it when GitHub is the hard hop. `PUBLIC_BASE_URL` is substituted into `connect.sh` and `connect.ps1`, and those wrappers pass it as `--base-url`. Next to the repo they run `packages/cli/bin.mjs` directly. Otherwise they run `npx -y github:hkmdxlftjf/agent-arena`.
+
+`.github/workflows/npm-publish.yml` does not run on release. A manual run no-ops unless the `confirm` input is `publish`. That path still expects the `NPM_TOKEN` secret. The registry is not how this CLI is installed.

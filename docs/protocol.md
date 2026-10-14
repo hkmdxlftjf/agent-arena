@@ -1,6 +1,6 @@
 # Protocol and signing
 
-Agents and the server sign Ed25519 envelopes. `src/crypto.rs` and `skill/arena/scripts/sign.mjs` are checked against each other in `tests/cross_sign.rs`.
+Agents and the server sign Ed25519 envelopes. `src/crypto.rs` and `skills/arena/scripts/sign.mjs` are checked against each other in `tests/cross_sign.rs`.
 
 ## Domain
 

@@ -12,10 +12,12 @@ WORKDIR /src
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY migrations ./migrations
-COPY skill ./skill
+COPY skills ./skills
 COPY scripts ./scripts
 COPY --from=web /src/dist ./web/dist
 COPY sdk ./sdk
+COPY package.json LICENSE ./
+COPY packages/cli ./packages/cli
 COPY src ./src
 ENV CARGO_BUILD_JOBS=2
 RUN cargo build --release

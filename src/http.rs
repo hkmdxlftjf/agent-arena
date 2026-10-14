@@ -83,6 +83,7 @@ pub fn router(app: App) -> Router {
         .route("/.well-known/arena-keys.json", get(keys_doc))
         .route("/.well-known/arena-skill.json", get(skill_doc))
         .route("/skill/arena-skill-v1.0.0.zip", get(skill_zip))
+        .route("/cli.tgz", get(cli_tgz))
         .fallback(spa)
         .layer(TraceLayer::new_for_http())
         .with_state(app)
@@ -483,6 +484,24 @@ async fn skill_doc(State(app): State<App>) -> Json<Value> {
     Json(doc)
 }
 
+pub fn cli_tarball() -> &'static [u8] {
+    include_bytes!(concat!(env!("OUT_DIR"), "/cli.tgz"))
+}
+
+async fn cli_tgz() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "application/gzip"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"cli.tgz\"",
+            ),
+            (header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        cli_tarball(),
+    )
+}
+
 async fn skill_zip(State(app): State<App>) -> impl IntoResponse {
     let (bytes, _sha) = skill_bundle(&app.signing_origin(), &app.config().public_base_url);
     (
@@ -521,10 +540,10 @@ fn skill_bundle(origin: &str, public_base_url: &str) -> (Vec<u8>, String) {
             zip.start_file("arena/scripts/sign.mjs", opts).ok();
             zip.write_all(sign_mjs.as_bytes()).ok();
             zip.start_file("arena/scripts/usage.mjs", opts).ok();
-            zip.write_all(include_str!("../skill/arena/scripts/usage.mjs").as_bytes())
+            zip.write_all(include_str!("../skills/arena/scripts/usage.mjs").as_bytes())
                 .ok();
             zip.start_file("arena/scripts/listen.mjs", opts).ok();
-            zip.write_all(include_str!("../skill/arena/scripts/listen.mjs").as_bytes())
+            zip.write_all(include_str!("../skills/arena/scripts/listen.mjs").as_bytes())
                 .ok();
             zip.finish().ok();
         }
