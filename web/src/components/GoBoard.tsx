@@ -41,29 +41,42 @@ export function GoBoard({
   const cols = columns(size)
   const paint = boardPaint(theme)
 
+  const line = paint?.line || "var(--board-line)"
+  const label = paint?.label || "var(--board-label)"
+  const width = compact ? 1.25 : 1.75
+
   return (
-    <svg viewBox={`0 0 ${span} ${span}`} className="h-auto w-full rounded-2xl border border-[#d7b98a]" role="img" aria-label={`${size} 路围棋`} style={paint ? { borderColor: paint.edge } : undefined}>
-      <rect width={span} height={span} fill={paint?.fill || "#e7c590"} />
+    <svg viewBox={`0 0 ${span} ${span}`} className="h-auto w-full rounded-2xl border" role="img" aria-label={`${size} 路围棋`} shapeRendering="geometricPrecision" style={{ borderColor: paint?.edge || "var(--board-edge)" }}>
+      <rect width={span} height={span} fill={paint?.fill || "var(--board-fill)"} />
       {Array.from({ length: size }, (_, i) => {
-        const a = xy(i, 0)
-        const b = xy(0, i)
+        const file = xy(i, 0)
+        const rank = xy(0, i)
         return (
           <g key={i}>
-            <line x1={xy(0, 0).x} y1={a.y} x2={xy(size - 1, 0).x} y2={a.y} stroke={paint?.line || "#6b4f2a"} strokeWidth="1" />
-            <line x1={b.x} y1={xy(0, 0).y} x2={b.x} y2={xy(0, size - 1).y} stroke={paint?.line || "#6b4f2a"} strokeWidth="1" />
+            <line x1={xy(0, 0).x} y1={rank.y} x2={xy(size - 1, 0).x} y2={rank.y} stroke={line} strokeWidth={width} />
+            <line x1={file.x} y1={xy(0, 0).y} x2={file.x} y2={xy(0, size - 1).y} stroke={line} strokeWidth={width} />
           </g>
         )
       })}
       {stars(size).map(([x, y]) => {
         const p = xy(x, y)
-        return <circle key={`${x}${y}`} cx={p.x} cy={p.y} r={compact ? 1.8 : 2.6} fill={paint?.line || "#6b4f2a"} />
+        return <circle key={`${x}${y}`} cx={p.x} cy={p.y} r={compact ? 2 : 3.2} fill={line} shapeRendering="geometricPrecision" />
       })}
       {!compact &&
         cols.map((file, x) => {
           const p = xy(x, 0)
           return (
-            <text key={file} x={p.x} y={span - 8} textAnchor="middle" fill={paint?.label || "#6b4f2a"} fontSize="11" fontFamily="JetBrains Mono, monospace">
+            <text key={file} x={p.x} y={span - 8} textAnchor="middle" fill={label} fontSize="11">
               {file}
+            </text>
+          )
+        })}
+      {!compact &&
+        Array.from({ length: size }, (_, y) => {
+          const p = xy(0, y)
+          return (
+            <text key={y} x={10} y={p.y + 4} textAnchor="middle" fill={label} fontSize="11">
+              {y + 1}
             </text>
           )
         })}
@@ -84,7 +97,7 @@ export function GoBoard({
           >
             <circle cx={p.x} cy={p.y} r={radius} fill={black ? "#1a1a1a" : "#f7f4ef"} stroke={black ? "#1a1a1a" : "#cfc6b8"} />
             {stone.at.toUpperCase() === lastMove?.toUpperCase() && (
-              <circle cx={p.x} cy={p.y} r={radius * 0.28} fill={black ? "#f4f4f5" : "#8f2d2a"} />
+              <circle cx={p.x} cy={p.y} r={radius * 0.28} fill={black ? "#f4f4f5" : "#3f6b28"} />
             )}
           </motion.g>
         )

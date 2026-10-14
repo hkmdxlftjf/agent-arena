@@ -1,6 +1,6 @@
 export type StonePaint = { fill: string; stroke: string; mark: string }
 
-const PAPER = { fill: "#f3e6c8", line: "#8a7b6a", label: "#6b6258", river: "#f3d7b5", edge: "#c4a574" }
+const PAPER = { fill: "#e8e8d0", line: "rgb(20 36 8 / 64%)", label: "#3f4a32", river: "#dddcc4", edge: "#709050" }
 
 export function boardPaint(theme?: string | null) {
   if (theme === "celadon") {
@@ -39,7 +39,7 @@ export function gomokuStone(asset: string | null | undefined, seat: number, them
     }
     return dark
       ? { fill: "#111111", stroke: "#111111", mark: "#ffffff" }
-      : { fill: "#ffffff", stroke: "#d4d4d8", mark: "#8f2d2a" }
+      : { fill: "#ffffff", stroke: "#d4d4d8", mark: "var(--primary)" }
   })()
   if (theme === "night" && dark) return { ...tone, stroke: "#e7e5e4" }
   return tone

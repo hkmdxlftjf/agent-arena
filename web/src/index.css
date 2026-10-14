@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "./palettes.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -52,40 +53,46 @@
 }
 
 :root {
-    --background: #f3eee6;
-    --foreground: #1c1612;
-    --card: #fffaf3;
-    --card-foreground: #1c1612;
-    --popover: #fffaf3;
-    --popover-foreground: #1c1612;
-    --primary: #8f2d2a;
-    --primary-foreground: #fff8f4;
-    --secondary: #efe4d2;
-    --secondary-foreground: #2a2118;
-    --muted: #e8dfd1;
-    --muted-foreground: #5c5348;
-    --accent: #efe4d2;
-    --accent-foreground: #2a2118;
-    --destructive: #9f2d2d;
-    --border: #e0d3c2;
-    --input: #e0d3c2;
-    --ring: #8f2d2a;
-    --live: #1f7a4d;
-    --warn: #8f5c00;
-    --wood: #b98548;
-    --ink: #243038;
-    --jade: #2f6b57;
-    --gold: #8a6a2f;
-    --code-bg: #2a241e;
-    --code-fg: #f6efe4;
-    --shadow-card: 0 1px 2px rgb(48 32 16 / 6%), 0 10px 28px rgb(48 32 16 / 7%);
-    --shadow-lift: 0 10px 24px rgb(48 32 16 / 12%);
-    --chart-1: #8f2d2a;
-    --chart-2: #2f6b57;
-    --chart-3: #b98548;
-    --chart-4: #243038;
-    --chart-5: #8a6a2f;
-    --radius: 0.75rem;
+    --background: #f4f1e4;
+    --foreground: #312e2b;
+    --card: #fffdf8;
+    --card-foreground: #312e2b;
+    --popover: #fffdf8;
+    --popover-foreground: #312e2b;
+    --primary: #81b64c;
+    --primary-foreground: #312e2b;
+    --secondary: #e8e8d0;
+    --secondary-foreground: #312e2b;
+    --muted: #e7e4d6;
+    --muted-foreground: #5c564e;
+    --accent: #e8e8d0;
+    --accent-foreground: #312e2b;
+    --destructive: #9a3412;
+    --border: #d9d3c2;
+    --input: #d9d3c2;
+    --ring: #3f6b28;
+    --live: #3f6b28;
+    --warn: #8a5a00;
+    --wood: #709050;
+    --ink: #312e2b;
+    --jade: #3f6b28;
+    --gold: #81b64c;
+    --board-fill: #e8e8d0;
+    --board-line: rgb(20 36 8 / 64%);
+    --board-label: #3f4a32;
+    --board-edge: #709050;
+    --board-frame: linear-gradient(180deg, #e8e8d0, #d5d6b8);
+    --code-bg: #312e2b;
+    --code-fg: #f4f1e4;
+    --shadow-card: 0 1px 2px rgb(48 46 43 / 8%);
+    --shadow-lift: 0 8px 18px rgb(48 46 43 / 12%);
+    --chart-1: #81b64c;
+    --chart-2: #709050;
+    --chart-3: #312e2b;
+    --chart-4: #e8e8d0;
+    --chart-5: #3f6b28;
+    --radius: 5px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Helvetica, Arial, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
@@ -97,32 +104,37 @@
 }
 
 .dark {
-    --background: #14110e;
-    --foreground: #f6efe6;
-    --card: #221c17;
-    --card-foreground: #f6efe6;
-    --popover: #221c17;
-    --popover-foreground: #f6efe6;
-    --primary: #e7b2a8;
-    --primary-foreground: #2a1210;
-    --secondary: #2c261f;
-    --secondary-foreground: #f6efe6;
-    --muted: #2c261f;
-    --muted-foreground: #cbbfaf;
-    --accent: #2c261f;
-    --accent-foreground: #f6efe6;
-    --destructive: #f0a8a0;
-    --border: rgb(246 239 230 / 12%);
-    --input: rgb(246 239 230 / 16%);
-    --ring: #e7b2a8;
-    --live: #8dcea9;
+    --background: #302e2b;
+    --foreground: #f4f1e4;
+    --card: #3c3935;
+    --card-foreground: #f4f1e4;
+    --popover: #3c3935;
+    --popover-foreground: #f4f1e4;
+    --primary: #81b64c;
+    --primary-foreground: #1c1b18;
+    --secondary: #3c3935;
+    --secondary-foreground: #f4f1e4;
+    --muted: #3c3935;
+    --muted-foreground: #c8c2b4;
+    --accent: #3c3935;
+    --accent-foreground: #f4f1e4;
+    --destructive: #f0a090;
+    --border: rgb(244 241 228 / 14%);
+    --input: rgb(244 241 228 / 18%);
+    --ring: #81b64c;
+    --live: #9dce74;
     --warn: #e6c36a;
-    --wood: #8a6844;
-    --ink: #d5dde2;
-    --jade: #8dcea9;
-    --gold: #e6c36a;
-    --code-bg: #100e0c;
-    --code-fg: #f6efe4;
+    --wood: #709050;
+    --ink: #f4f1e4;
+    --jade: #9dce74;
+    --gold: #81b64c;
+    --board-fill: #2a3324;
+    --board-line: rgb(214 224 186 / 70%);
+    --board-label: #d5dcc4;
+    --board-edge: #709050;
+    --board-frame: linear-gradient(180deg, #3a4332, #2a3324);
+    --code-bg: #1c1b18;
+    --code-fg: #f4f1e4;
     --shadow-card: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 28px rgb(0 0 0 / 28%);
     --shadow-lift: 0 12px 28px rgb(0 0 0 / 40%);
     --chart-1: oklch(0.87 0 0);
@@ -146,9 +158,6 @@
     }
   body {
     @apply bg-background text-foreground;
-    background-image:
-      radial-gradient(circle at 12% -10%, rgb(185 133 72 / 16%), transparent 32%),
-      radial-gradient(circle at 100% 0%, rgb(143 45 42 / 8%), transparent 26%);
     }
   html {
     @apply font-sans;
@@ -157,8 +166,11 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
-  h1 {
-    letter-spacing: -0.03em;
+  h1,
+  h1.font-medium,
+  h1.tracking-tight {
+    font-weight: 700;
+    letter-spacing: 0;
   }
 }
 
@@ -173,10 +185,11 @@ a:hover > [data-slot="card"],
 }
 
 .nav-link {
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 0.375rem 0.75rem;
   color: var(--muted-foreground);
   font-size: 0.875rem;
+  font-weight: 500;
 }
 .nav-link-active {
   background: color-mix(in srgb, var(--primary) 14%, transparent);
@@ -189,26 +202,15 @@ a:hover > [data-slot="card"],
 }
 
 .paper-board {
-  background:
-    radial-gradient(circle at 18% 0%, rgb(255 255 255 / 55%), transparent 42%),
-    linear-gradient(180deg, #f8f1e6, #efe2cf);
-}
-.dark .paper-board {
-  background: #2a241c;
+  background: var(--board-fill);
+  border-color: var(--board-edge);
 }
 
 .board-frame {
   border-radius: 1rem;
   padding: 0.75rem;
-  background:
-    radial-gradient(circle at 18% 0%, rgb(255 255 255 / 28%), transparent 36%),
-    linear-gradient(160deg, #f0d7b0, #c99562 58%, #a87440);
-  box-shadow: inset 0 0 0 1px rgb(90 48 18 / 22%), var(--shadow-card);
-}
-.dark .board-frame {
-  background:
-    radial-gradient(circle at 18% 0%, rgb(255 255 255 / 8%), transparent 36%),
-    linear-gradient(160deg, #4a3422, #2a1c13);
+  background: var(--board-frame);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--board-edge) 70%, transparent), var(--shadow-card);
 }
 
 .code-block {

@@ -316,7 +316,7 @@ function Preview({
   piece?: string
   board?: string
 }) {
-  const paint = boardPaint(board) || { fill: "#f3e6c8", line: "#8a7b6a", label: "#6b6258", river: "#f3d7b5", edge: "#c4a574" }
+  const paint = boardPaint(board) || { fill: "var(--board-fill)", line: "var(--board-line)", label: "var(--board-label)", river: "var(--board-fill)", edge: "var(--board-edge)" }
   const dark = gomokuStone(piece, 0, board)
   const light = gomokuStone(piece, 1, board)
   const red = xiangqiDisc(piece, true)

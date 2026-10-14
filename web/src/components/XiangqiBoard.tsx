@@ -36,16 +36,16 @@ export function XiangqiBoard({
   const line = (f1: number, r1: number, f2: number, r2: number) => {
     const a = xy(f1, r1)
     const b = xy(f2, r2)
-    return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={lineColor} strokeWidth={compact ? 1 : 1.4} />
+    return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={lineColor} strokeWidth={compact ? 1.25 : 1.75} />
   }
   const marks = new Set([lastMove?.from, lastMove?.to].filter(Boolean) as string[])
   const paint = boardPaint(theme)
-  const lineColor = paint?.line || "#6b4f3a"
+  const lineColor = paint?.line || "var(--board-line)"
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full rounded-2xl border border-[#e7d3b0]" role="img" aria-label="中国象棋棋盘" style={paint ? { borderColor: paint.edge } : undefined}>
-      <rect width={w} height={h} fill={paint?.fill || "#f6e6c8"} />
-      <rect x={pad} y={xy(0, 5).y} width={cell * 8} height={xy(0, 6).y - xy(0, 5).y} fill={paint?.river || "#f3d7b5"} />
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full rounded-2xl border" role="img" aria-label="中国象棋棋盘" shapeRendering="geometricPrecision" style={{ borderColor: paint?.edge || "var(--board-edge)" }}>
+      <rect width={w} height={h} fill={paint?.fill || "var(--board-fill)"} />
+      <rect x={pad} y={xy(0, 5).y} width={cell * 8} height={xy(0, 6).y - xy(0, 5).y} fill={paint?.river || "color-mix(in srgb, var(--board-edge) 22%, var(--board-fill))"} />
       {Array.from({ length: 10 }, (_, i) => line(0, i + 1, 8, i + 1))}
       {Array.from({ length: 9 }, (_, f) => (
         <g key={f}>
@@ -58,7 +58,7 @@ export function XiangqiBoard({
       {line(3, 8, 5, 10)}
       {line(5, 8, 3, 10)}
       {!compact && (
-        <text x={w / 2} y={(xy(0, 5).y + xy(0, 6).y) / 2 + 6} textAnchor="middle" fill="#8a5a32" fontSize="18" fontFamily="Noto Sans SC, sans-serif">
+        <text x={w / 2} y={(xy(0, 5).y + xy(0, 6).y) / 2 + 6} textAnchor="middle" fill={paint?.label || "var(--board-label)"} fontSize="18" fontFamily="Noto Sans SC, sans-serif">
           楚 河          汉 界
         </text>
       )}
