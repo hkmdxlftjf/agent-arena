@@ -1,3 +1,4 @@
+import { Avatar } from "@/cosmetics/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { api } from "@/lib/api"
@@ -8,12 +9,12 @@ import { Link, useParams } from "react-router-dom"
 
 type UserBody = {
   user: { handle: string; created_at: number }
-  agents: { id: string; name: string; model_label?: string | null; ratings: RatingRow[] }[]
+  agents: { id: string; name: string; model_label?: string | null; title?: string | null; bio?: string | null; look?: { avatar_preset?: string; color?: string; frame?: string | null; avatar_url?: string | null; title?: string | null }; ratings: RatingRow[] }[]
   recent: RecentMatch[]
 }
 
 type AgentBody = {
-  agent: { id: string; name: string; description?: string | null; model_label?: string | null; handle: string }
+  agent: { id: string; name: string; description?: string | null; model_label?: string | null; handle: string; title?: string | null; bio?: string | null; look?: { avatar_preset?: string; color?: string; frame?: string | null; avatar_url?: string | null } }
   ratings: RatingRow[]
   recent: RecentMatch[]
 }
@@ -55,8 +56,11 @@ export function UserProfile() {
           <Link key={agent.id} to={`/a/${agent.id}`}>
             <Card className="transition-transform hover:-translate-y-0.5">
               <CardHeader>
-                <CardTitle>{agent.name}</CardTitle>
-                <CardDescription>{agent.model_label || "未标注模型"}</CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <Avatar preset={agent.look?.avatar_preset} color={agent.look?.color} frame={agent.look?.frame} imageUrl={agent.look?.avatar_url} size={32} />
+                  <span>{agent.name}</span>
+                </CardTitle>
+                <CardDescription>{agent.title || agent.model_label || "未标注模型"}</CardDescription>
               </CardHeader>
               <CardContent>
                 <Ratings ratings={agent.ratings} />
@@ -100,8 +104,14 @@ export function AgentProfile() {
       <p className="text-sm text-muted-foreground">
         智能体 · <Link className="text-primary" to={`/u/${body.agent.handle}`}>@{body.agent.handle}</Link>
       </p>
-      <h1 className="mt-1 text-3xl font-medium tracking-tight">{body.agent.name}</h1>
-      <p className="mt-2 text-sm text-muted-foreground">{body.agent.description || body.agent.model_label || "还没有简介。"}</p>
+      <div className="mt-3 flex items-center gap-3">
+        <Avatar preset={body.agent.look?.avatar_preset} color={body.agent.look?.color} frame={body.agent.look?.frame} imageUrl={body.agent.look?.avatar_url} size={64} />
+        <div>
+          <h1 className="text-3xl font-medium tracking-tight">{body.agent.name}</h1>
+          {body.agent.title ? <p className="text-sm text-primary">{body.agent.title}</p> : null}
+        </div>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">{body.agent.bio || body.agent.description || body.agent.model_label || "还没有简介。"}</p>
       <h2 className="mt-8 text-lg font-medium">评分</h2>
       <div className="mt-3">
         <Ratings ratings={body.ratings} />

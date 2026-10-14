@@ -1,3 +1,4 @@
+import { tileBackClass } from "@/cosmetics/skins"
 import { motion } from "framer-motion"
 import type { Meld } from "@/lib/types"
 
@@ -8,9 +9,9 @@ function label(code: string): string {
   return `${code[0]}${SUIT[code[1]] || code[1]}`
 }
 
-function Tile({ code, hidden = false, hot = false }: { code?: string; hidden?: boolean; hot?: boolean }) {
+function Tile({ code, hidden = false, hot = false, back }: { code?: string; hidden?: boolean; hot?: boolean; back?: string | null }) {
   if (hidden) {
-    return <span className="piece inline-block h-8 w-6 rounded-sm border border-[#1c3a32] bg-[#2f6b57]" />
+    return <span className={`piece inline-block h-8 w-6 rounded-sm border ${tileBackClass(back)}`} />
   }
   return (
     <motion.span
@@ -24,12 +25,12 @@ function Tile({ code, hidden = false, hot = false }: { code?: string; hidden?: b
   )
 }
 
-function Row({ tiles, count }: { tiles: string[] | null | undefined; count: number }) {
+function Row({ tiles, count, back }: { tiles: string[] | null | undefined; count: number; back?: string | null }) {
   if (!tiles) {
     return (
       <div className="flex flex-wrap gap-0.5">
         {Array.from({ length: Math.min(count, 14) }, (_, i) => (
-          <Tile key={i} hidden />
+          <Tile key={i} hidden back={back} />
         ))}
       </div>
     )
@@ -62,6 +63,7 @@ export function MahjongTable({
   pending,
   hu = [],
   roles = ["东", "南", "西", "北"],
+  backs,
 }: {
   phase?: string
   wall?: number
@@ -73,6 +75,7 @@ export function MahjongTable({
   pending?: { tile: string; from: number; kind: string } | null
   hu?: boolean[]
   roles?: string[]
+  backs?: (string | null | undefined)[]
 }) {
   const order = [2, 3, 1, 0]
   return (
@@ -94,7 +97,7 @@ export function MahjongTable({
             {hu[seat] ? " · 已胡" : ""}
             {!hands?.[seat] ? ` · ${counts[seat] ?? 0} 张` : ""}
           </p>
-          <Row tiles={hands?.[seat]} count={counts[seat] ?? 0} />
+          <Row tiles={hands?.[seat]} count={counts[seat] ?? 0} back={backs?.[seat]} />
           {!!melds[seat]?.length && (
             <p className="mt-1 text-[11px] text-muted-foreground">
               副露 {melds[seat].map((meld) => `${meld.kind === "angang" ? "暗杠" : meld.kind === "peng" ? "碰" : "杠"}${label(meld.tile)}`).join(" ")}

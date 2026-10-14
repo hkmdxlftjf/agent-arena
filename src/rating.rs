@@ -364,8 +364,25 @@ pub fn provisional(games: i32, rd: f64) -> bool {
 
 pub async fn leaderboard(pool: &sqlx::PgPool, game: &str) -> anyhow::Result<Value> {
     if game == "overall" {
-        let rows = sqlx::query_as::<_, (Uuid, String, String, String, f64, f64, i32)>(
-            r#"SELECT a.id, a.name, u.handle, r.game_id, r.rating, r.rd, r.games
+        let rows = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                String,
+                String,
+                String,
+                f64,
+                f64,
+                i32,
+                Option<String>,
+                String,
+                String,
+                bool,
+                Option<String>,
+            ),
+        >(
+            r#"SELECT a.id, a.name, u.handle, r.game_id, r.rating, r.rd, r.games,
+                      a.title, a.color, a.avatar_preset, a.avatar_image, a.frame_id
                FROM ratings r
                JOIN agents a ON a.id = r.agent_id
                JOIN users u ON u.id = a.owner_id
@@ -374,26 +391,55 @@ pub async fn leaderboard(pool: &sqlx::PgPool, game: &str) -> anyhow::Result<Valu
         .bind(SEASON)
         .fetch_all(pool)
         .await?;
-        let mut acc: std::collections::HashMap<Uuid, (String, String, f64, f64)> =
-            std::collections::HashMap::new();
-        for (id, name, handle, _, rating, rd, games) in rows {
+        struct Acc {
+            name: String,
+            handle: String,
+            title: Option<String>,
+            color: String,
+            preset: String,
+            image: bool,
+            frame_id: Option<String>,
+            sum: f64,
+            weight: f64,
+        }
+        let mut acc: std::collections::HashMap<Uuid, Acc> = std::collections::HashMap::new();
+        for (id, name, handle, _, rating, rd, games, title, color, preset, image, frame_id) in rows
+        {
             let weight = (1.0 + games as f64).ln();
-            let entry = acc.entry(id).or_insert((name, handle, 0.0, 0.0));
-            entry.2 += weight * (rating - 2.0 * rd);
-            entry.3 += weight;
+            let entry = acc.entry(id).or_insert(Acc {
+                name,
+                handle,
+                title,
+                color,
+                preset,
+                image,
+                frame_id,
+                sum: 0.0,
+                weight: 0.0,
+            });
+            entry.sum += weight * (rating - 2.0 * rd);
+            entry.weight += weight;
         }
         let mut list: Vec<Value> = acc
             .into_iter()
-            .map(|(id, (name, handle, sum, weight))| {
+            .map(|(id, row)| {
+                let look = crate::cosmetics::Appearance {
+                    title: row.title,
+                    color: row.color,
+                    avatar_preset: row.preset,
+                    avatar_image: row.image,
+                    frame_id: row.frame_id,
+                };
                 json!({
                     "agent_id": id,
-                    "name": name,
-                    "handle": handle,
-                    "rating": (sum / weight).round(),
+                    "name": row.name,
+                    "handle": row.handle,
+                    "rating": (row.sum / row.weight).round(),
                     "rd": Value::Null,
                     "games": Value::Null,
                     "provisional": false,
-                    "conservative": sum / weight,
+                    "conservative": row.sum / row.weight,
+                    "look": crate::cosmetics::appearance_json(id, &look),
                 })
             })
             .collect();
@@ -409,8 +455,26 @@ pub async fn leaderboard(pool: &sqlx::PgPool, game: &str) -> anyhow::Result<Valu
         }
         return Ok(json!({"game": "overall", "season": SEASON, "rows": list}));
     }
-    let rows = sqlx::query_as::<_, (Uuid, String, String, f64, f64, i32, i32, String)>(
-        r#"SELECT a.id, a.name, u.handle, r.rating, r.rd, r.games, r.wins, r.system
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            String,
+            f64,
+            f64,
+            i32,
+            i32,
+            String,
+            Option<String>,
+            String,
+            String,
+            bool,
+            Option<String>,
+        ),
+    >(
+        r#"SELECT a.id, a.name, u.handle, r.rating, r.rd, r.games, r.wins, r.system,
+                  a.title, a.color, a.avatar_preset, a.avatar_image, a.frame_id
            FROM ratings r
            JOIN agents a ON a.id = r.agent_id
            JOIN users u ON u.id = a.owner_id
@@ -424,21 +488,48 @@ pub async fn leaderboard(pool: &sqlx::PgPool, game: &str) -> anyhow::Result<Valu
     let list: Vec<Value> = rows
         .into_iter()
         .enumerate()
-        .map(|(i, (id, name, handle, rating, rd, games, wins, system))| {
-            json!({
-                "rank": i + 1,
-                "agent_id": id,
-                "name": name,
-                "handle": handle,
-                "rating": rating.round(),
-                "rd": rd.round(),
-                "games": games,
-                "wins": wins,
-                "system": system,
-                "provisional": provisional(games, rd),
-                "conservative": rating - 2.0 * rd,
-            })
-        })
+        .map(
+            |(
+                i,
+                (
+                    id,
+                    name,
+                    handle,
+                    rating,
+                    rd,
+                    games,
+                    wins,
+                    system,
+                    title,
+                    color,
+                    preset,
+                    image,
+                    frame_id,
+                ),
+            )| {
+                let look = crate::cosmetics::Appearance {
+                    title,
+                    color,
+                    avatar_preset: preset,
+                    avatar_image: image,
+                    frame_id,
+                };
+                json!({
+                    "rank": i + 1,
+                    "agent_id": id,
+                    "name": name,
+                    "handle": handle,
+                    "rating": rating.round(),
+                    "rd": rd.round(),
+                    "games": games,
+                    "wins": wins,
+                    "system": system,
+                    "provisional": provisional(games, rd),
+                    "conservative": rating - 2.0 * rd,
+                    "look": crate::cosmetics::appearance_json(id, &look),
+                })
+            },
+        )
         .collect();
     Ok(json!({"game": game, "season": SEASON, "rows": list}))
 }

@@ -2,6 +2,7 @@ pub mod app;
 pub mod canon;
 pub mod chain;
 pub mod config;
+pub mod cosmetics;
 pub mod crypto;
 pub mod doudizhu;
 pub mod error;

@@ -1,4 +1,5 @@
 import { motion } from "framer-motion"
+import { boardPaint, xiangqiDisc } from "@/cosmetics/skins"
 import type { XiangqiPiece } from "@/lib/types"
 
 const FILES = "abcdefghi".split("")
@@ -16,12 +17,16 @@ export function XiangqiBoard({
   check = false,
   toAct = [],
   compact = false,
+  theme,
+  skins,
 }: {
   pieces?: XiangqiPiece[]
   lastMove?: { from?: string; to?: string } | null
   check?: boolean
   toAct?: number[]
   compact?: boolean
+  theme?: string | null
+  skins?: Record<number, string | undefined>
 }) {
   const cell = compact ? 28 : 48
   const pad = compact ? 16 : 32
@@ -31,14 +36,16 @@ export function XiangqiBoard({
   const line = (f1: number, r1: number, f2: number, r2: number) => {
     const a = xy(f1, r1)
     const b = xy(f2, r2)
-    return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#6b4f3a" strokeWidth={compact ? 1 : 1.4} />
+    return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={lineColor} strokeWidth={compact ? 1 : 1.4} />
   }
   const marks = new Set([lastMove?.from, lastMove?.to].filter(Boolean) as string[])
+  const paint = boardPaint(theme)
+  const lineColor = paint?.line || "#6b4f3a"
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full rounded-2xl border border-[#e7d3b0]" role="img" aria-label="中国象棋棋盘">
-      <rect width={w} height={h} fill="#f6e6c8" />
-      <rect x={pad} y={xy(0, 5).y} width={cell * 8} height={xy(0, 6).y - xy(0, 5).y} fill="#f3d7b5" />
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full rounded-2xl border border-[#e7d3b0]" role="img" aria-label="中国象棋棋盘" style={paint ? { borderColor: paint.edge } : undefined}>
+      <rect width={w} height={h} fill={paint?.fill || "#f6e6c8"} />
+      <rect x={pad} y={xy(0, 5).y} width={cell * 8} height={xy(0, 6).y - xy(0, 5).y} fill={paint?.river || "#f3d7b5"} />
       {Array.from({ length: 10 }, (_, i) => line(0, i + 1, 8, i + 1))}
       {Array.from({ length: 9 }, (_, f) => (
         <g key={f}>
@@ -60,6 +67,7 @@ export function XiangqiBoard({
         if (!pos) return null
         const p = xy(pos.f, pos.r)
         const red = piece.side === 0
+        const disc = xiangqiDisc(skins?.[piece.side], red)
         const radius = compact ? 11 : 18
         const marked = marks.has(piece.at)
         return (
@@ -71,7 +79,7 @@ export function XiangqiBoard({
             transition={{ duration: 0.32, ease: [0.2, 0.8, 0.2, 1] }}
             style={{ transformOrigin: `${p.x}px ${p.y}px` }}
           >
-            <circle cx={p.x} cy={p.y} r={radius} fill="#fffaf3" stroke={red ? "#b42318" : "#1c1917"} strokeWidth={marked ? 2.4 : 1.4} />
+            <circle cx={p.x} cy={p.y} r={radius} fill={disc.fill} stroke={disc.stroke} strokeWidth={marked ? 2.4 : 1.4} />
             <text
               x={p.x}
               y={p.y + (compact ? 4 : 6)}

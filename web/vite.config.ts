@@ -20,6 +20,7 @@ export default defineConfig({
       "/skill": "http://127.0.0.1:18480",
       "/sdk": "http://127.0.0.1:18480",
       "/examples": "http://127.0.0.1:18480",
+      "/avatars": "http://127.0.0.1:18480",
     },
   },
 });

@@ -1,3 +1,4 @@
+import { boardPaint } from "@/cosmetics/skins"
 import { motion } from "framer-motion"
 import type { GoPoint } from "@/lib/types"
 
@@ -25,40 +26,43 @@ export function GoBoard({
   points = [],
   lastMove,
   compact = false,
+  theme,
 }: {
   size?: number
   points?: GoPoint[]
   lastMove?: string | null
   compact?: boolean
+  theme?: string | null
 }) {
   const cell = compact ? size > 13 ? 14 : 18 : size > 13 ? 26 : 34
   const pad = compact ? 14 : 28
   const span = pad * 2 + cell * (size - 1)
   const xy = (x: number, y: number) => ({ x: pad + x * cell, y: pad + (size - 1 - y) * cell })
   const cols = columns(size)
+  const paint = boardPaint(theme)
 
   return (
-    <svg viewBox={`0 0 ${span} ${span}`} className="h-auto w-full rounded-2xl border border-[#d7b98a]" role="img" aria-label={`${size} 路围棋`}>
-      <rect width={span} height={span} fill="#e7c590" />
+    <svg viewBox={`0 0 ${span} ${span}`} className="h-auto w-full rounded-2xl border border-[#d7b98a]" role="img" aria-label={`${size} 路围棋`} style={paint ? { borderColor: paint.edge } : undefined}>
+      <rect width={span} height={span} fill={paint?.fill || "#e7c590"} />
       {Array.from({ length: size }, (_, i) => {
         const a = xy(i, 0)
         const b = xy(0, i)
         return (
           <g key={i}>
-            <line x1={xy(0, 0).x} y1={a.y} x2={xy(size - 1, 0).x} y2={a.y} stroke="#6b4f2a" strokeWidth="1" />
-            <line x1={b.x} y1={xy(0, 0).y} x2={b.x} y2={xy(0, size - 1).y} stroke="#6b4f2a" strokeWidth="1" />
+            <line x1={xy(0, 0).x} y1={a.y} x2={xy(size - 1, 0).x} y2={a.y} stroke={paint?.line || "#6b4f2a"} strokeWidth="1" />
+            <line x1={b.x} y1={xy(0, 0).y} x2={b.x} y2={xy(0, size - 1).y} stroke={paint?.line || "#6b4f2a"} strokeWidth="1" />
           </g>
         )
       })}
       {stars(size).map(([x, y]) => {
         const p = xy(x, y)
-        return <circle key={`${x}${y}`} cx={p.x} cy={p.y} r={compact ? 1.8 : 2.6} fill="#6b4f2a" />
+        return <circle key={`${x}${y}`} cx={p.x} cy={p.y} r={compact ? 1.8 : 2.6} fill={paint?.line || "#6b4f2a"} />
       })}
       {!compact &&
         cols.map((file, x) => {
           const p = xy(x, 0)
           return (
-            <text key={file} x={p.x} y={span - 8} textAnchor="middle" fill="#6b4f2a" fontSize="11" fontFamily="JetBrains Mono, monospace">
+            <text key={file} x={p.x} y={span - 8} textAnchor="middle" fill={paint?.label || "#6b4f2a"} fontSize="11" fontFamily="JetBrains Mono, monospace">
               {file}
             </text>
           )

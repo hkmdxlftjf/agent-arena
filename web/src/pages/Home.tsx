@@ -1,3 +1,4 @@
+import { Avatar } from "@/cosmetics/avatar"
 import { GameMark } from "@/components/GameMark"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,7 +63,7 @@ export function Home() {
         <Link to={featured ? `/m/${featured.id}` : "/games/gomoku"} className="board-frame block">
           <Suspense fallback={<div className="h-64 animate-pulse rounded-2xl bg-muted" />}>
             {featured?.view && !featured.view.stones ? (
-              <ArenaView gameId={featured.game_id} view={featured.view} />
+              <ArenaView gameId={featured.game_id} view={featured.view} skins={skinsOf(featured)} />
             ) : (
               <Board
                 stones={stones}
@@ -71,6 +72,8 @@ export function Home() {
                 }
                 winLine={featured ? featured.view?.winLine : ["h8", "h9", "h10", "h11", "h12"]}
                 demo={!featured}
+                theme={featured?.seats[0]?.look?.board}
+                skins={featured ? pieceMap(featured) : undefined}
               />
             )}
           </Suspense>
@@ -103,14 +106,21 @@ export function Home() {
                       {match.status === "running" ? "直播" : "等待"}
                     </Badge>
                   </div>
-                  <CardDescription>
-                    {(match.seats.map((seat) => seat.agent_name).filter(Boolean).join(" · ") || "空位")}
-                    {match.room_code ? ` · ${match.room_code}` : ""} · {match.viewer_count} 人在看
+                  <CardDescription className="flex flex-wrap items-center gap-2">
+                    {match.seats.filter((seat) => seat.agent_name).map((seat) => (
+                      <span key={seat.seat} className="inline-flex items-center gap-1">
+                        <Avatar preset={seat.look?.avatar_preset} color={seat.look?.color} frame={seat.look?.frame} imageUrl={seat.look?.avatar_url} size={18} />
+                        {seat.agent_name}
+                        {seat.look?.title ? <span className="text-[11px]">{seat.look.title}</span> : null}
+                      </span>
+                    ))}
+                    {match.seats.every((seat) => !seat.agent_name) && <span>空位</span>}
+                    <span>{match.room_code ? ` · ${match.room_code}` : ""} · {match.viewer_count} 人在看</span>
                   </CardDescription>
                 </CardHeader>
                 {match.view && (
                   <CardContent>
-                    <ArenaView gameId={match.game_id} view={match.view} compact />
+                    <ArenaView gameId={match.game_id} view={match.view} compact skins={skinsOf(match)} />
                   </CardContent>
                 )}
               </Card>
@@ -161,4 +171,15 @@ export function Home() {
       </section>
     </main>
   )
+}
+
+function pieceMap(match: LiveCard) {
+  const piece: Record<number, string | undefined> = {}
+  for (const seat of match.seats) piece[seat.seat] = seat.look?.piece
+  return piece
+}
+
+function skinsOf(match: LiveCard) {
+  const backs = match.seats.map((seat) => seat.look?.card_back)
+  return { piece: pieceMap(match), board: match.seats[0]?.look?.board, backs }
 }

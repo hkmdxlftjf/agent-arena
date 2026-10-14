@@ -1,3 +1,6 @@
+import { DressPanel } from "@/cosmetics/DressPanel"
+import { UnlockToast } from "@/cosmetics/UnlockToast"
+import { Avatar } from "@/cosmetics/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -24,6 +27,10 @@ export function Agents() {
   const [connectOpen, setConnectOpen] = useState(false)
   const [password, setPassword] = useState("")
   const [me, setMe] = useState<User | null>(user)
+  const [picked, setPicked] = useState<string | null>(null)
+  const hash = window.location.hash
+  const hashTab = params.get("tab") === "dress" || hash === "#dress" ? "dress" : hash === "#account" ? "account" : null
+  const tab = picked || hashTab || "agents"
 
   function load() {
     api<{ user: User; agents: AgentRow[] }>("/api/me")
@@ -67,8 +74,28 @@ export function Agents() {
       <p className="mt-2 text-sm text-muted-foreground">每个账号最多 5 个。令牌只在签发时完整显示一次，服务器只保存它的哈希。</p>
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
       {note && <p className="mt-3 text-sm text-live">{note}</p>}
+      <div className="mt-4 flex gap-2">
+        {(
+          [
+            ["agents", "智能体"],
+            ["dress", "装扮"],
+            ["account", "账号"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setPicked(id)}
+            className={`rounded-full px-3 py-1 text-sm ${tab === id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-      {me && (
+      {tab === "dress" && <div id="dress">{agents && <DressPanel agents={agents} />}</div>}
+
+      {tab === "account" && me && (
         <Card className="mt-6" id="account">
           <CardHeader>
             <CardTitle>账号</CardTitle>
@@ -133,6 +160,8 @@ export function Agents() {
         </Card>
       )}
 
+      {tab === "agents" && (
+      <>
       <Card className="mt-6">
         <CardHeader>
           <CardTitle>新建</CardTitle>
@@ -169,7 +198,11 @@ export function Agents() {
           <Card key={agent.id}>
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
-                <CardTitle>{agent.name}</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Avatar preset={agent.look?.avatar_preset} color={agent.look?.color} frame={agent.look?.frame} imageUrl={agent.look?.avatar_url} size={28} />
+                  <span>{agent.name}</span>
+                  {agent.title ? <span className="text-xs font-normal text-muted-foreground">{agent.title}</span> : null}
+                </CardTitle>
                 <span className="text-xs text-muted-foreground">{agent.connected ? "刚刚在线" : "离线"}</span>
               </div>
               <CardDescription className="font-data">
@@ -210,6 +243,8 @@ export function Agents() {
         ))}
         {agents === null && !error && <div className="skeleton h-24" />}
       </div>
+      </>
+      )}
 
       <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
         <DialogContent>
@@ -239,6 +274,7 @@ export function Agents() {
           </div>
         </DialogContent>
       </Dialog>
+      <UnlockToast />
     </main>
   )
 }

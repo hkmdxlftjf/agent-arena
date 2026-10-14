@@ -8,7 +8,23 @@ import { XiangqiBoard } from "@/components/XiangqiBoard"
 import { roleOf } from "@/lib/games"
 import type { GameView, GridCell, JunqiCell, Trick } from "@/lib/types"
 
-export function ArenaView({ gameId, view, compact = false }: { gameId: string; view: GameView | null; compact?: boolean }) {
+export type SkinSet = {
+  piece: Record<number, string | undefined>
+  board?: string | null
+  backs?: (string | null | undefined)[]
+}
+
+export function ArenaView({
+  gameId,
+  view,
+  compact = false,
+  skins,
+}: {
+  gameId: string
+  view: GameView | null
+  compact?: boolean
+  skins?: SkinSet | null
+}) {
   if (!view) {
     return (
       <div className="grid h-64 place-items-center rounded-2xl border border-dashed border-border text-sm text-muted-foreground">
@@ -19,11 +35,11 @@ export function ArenaView({ gameId, view, compact = false }: { gameId: string; v
   const renderer = view.renderer || ""
   if (renderer === "xiangqi" || gameId === "xiangqi") {
     const last = view.lastMove && typeof view.lastMove === "object" ? view.lastMove : null
-    return <XiangqiBoard pieces={view.pieces} lastMove={last} check={view.check} toAct={view.toAct} compact={compact} />
+    return <XiangqiBoard pieces={view.pieces} lastMove={last} check={view.check} toAct={view.toAct} compact={compact} theme={skins?.board} skins={skins?.piece} />
   }
   if (renderer === "go" || gameId === "go") {
     const points = Array.isArray(view.points) && view.points.length && typeof view.points[0] === "object" ? (view.points as { at: string; seat: number }[]) : []
-    return <GoBoard size={view.size || 19} points={points} lastMove={typeof view.lastMove === "string" ? view.lastMove : null} compact={compact} />
+    return <GoBoard size={view.size || 19} points={points} lastMove={typeof view.lastMove === "string" ? view.lastMove : null} compact={compact} theme={skins?.board} />
   }
   if (renderer === "junqi" || gameId === "junqi") {
     const last = view.last && !("cards" in view.last) ? view.last : null
@@ -42,6 +58,7 @@ export function ArenaView({ gameId, view, compact = false }: { gameId: string; v
           multiplier={view.multiplier}
           last={last}
           roles={[0, 1, 2].map((seat) => roleOf(gameId, seat))}
+          backs={skins?.backs}
         />
     )
   }
@@ -58,6 +75,7 @@ export function ArenaView({ gameId, view, compact = false }: { gameId: string; v
           pending={view.pending}
           hu={view.hu}
           roles={[0, 1, 2, 3].map((seat) => roleOf(gameId, seat))}
+          backs={skins?.backs}
         />
     )
   }
@@ -72,6 +90,8 @@ export function ArenaView({ gameId, view, compact = false }: { gameId: string; v
         lastMove={typeof view.lastMove === "string" ? view.lastMove : null}
         winLine={view.winLine}
         compact={compact}
+        theme={skins?.board}
+        skins={skins?.piece}
       />
     )
   }

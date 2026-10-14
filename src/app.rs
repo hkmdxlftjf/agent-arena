@@ -147,6 +147,7 @@ impl App {
         .execute(&pool)
         .await?;
         let games = bootstrap_games(&pool).await?;
+        crate::cosmetics::ensure_catalog(&pool).await?;
         let uploads = load_uploads(&pool).await?;
         let app = Self {
             inner: Arc::new(Inner {
@@ -644,25 +645,67 @@ impl App {
     }
 
     pub async fn list_agents(&self, user: &User) -> Result<Vec<Value>, CallError> {
-        let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>, bool, Option<DateTime<Utc>>)>(
-            "SELECT id, name, description, model_label, allow_comments, last_seen_at FROM agents WHERE owner_id = $1 ORDER BY created_at",
+        let rows = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                String,
+                Option<String>,
+                Option<String>,
+                bool,
+                Option<DateTime<Utc>>,
+                Option<String>,
+                Option<String>,
+                String,
+                String,
+                bool,
+                Option<String>,
+            ),
+        >(
+            r#"SELECT id, name, description, model_label, allow_comments, last_seen_at,
+                      title, bio, color, avatar_preset, avatar_image, frame_id
+               FROM agents WHERE owner_id = $1 ORDER BY created_at"#,
         )
         .bind(user.id)
         .fetch_all(self.pool())
         .await
         .map_err(db_err)?;
         let mut out = Vec::new();
-        for (id, name, description, model_label, allow_comments, last_seen) in rows {
+        for (
+            id,
+            name,
+            description,
+            model_label,
+            allow_comments,
+            last_seen,
+            title,
+            bio,
+            color,
+            preset,
+            image,
+            frame_id,
+        ) in rows
+        {
             let keys = self.keys_of(id).await?;
             let tokens = self.tokens_of(id).await?;
+            let look = crate::cosmetics::Appearance {
+                title: title.clone(),
+                color,
+                avatar_preset: preset,
+                avatar_image: image,
+                frame_id,
+            };
             out.push(json!({
                 "id": id,
                 "name": name,
                 "description": description,
                 "model_label": model_label,
                 "allow_comments": allow_comments,
+                "title": title,
+                "bio": bio,
                 "last_seen_at": last_seen.map(|t| t.timestamp_millis()),
                 "connected": last_seen.map(|t| Utc::now().signed_duration_since(t).num_seconds() < 10).unwrap_or(false),
+                "look": crate::cosmetics::appearance_json(id, &look),
                 "keys": keys,
                 "tokens": tokens,
             }));
@@ -1729,17 +1772,33 @@ impl App {
         .await
         .map_err(db_err)?
         .ok_or_else(|| CallError::new(404, "not_found", "没有这个用户"))?;
-        let agents = sqlx::query_as::<_, (Uuid, String, Option<String>)>(
-            "SELECT id, name, model_label FROM agents WHERE owner_id = $1 ORDER BY created_at",
+        let agents = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>, Option<String>, String, String, bool, Option<String>)>(
+            r#"SELECT id, name, model_label, title, bio, color, avatar_preset, avatar_image, frame_id
+               FROM agents WHERE owner_id = $1 ORDER BY created_at"#,
         )
         .bind(user.0)
         .fetch_all(self.pool())
         .await
         .map_err(db_err)?;
         let mut listed = Vec::new();
-        for (id, name, model) in agents {
+        for (id, name, model, title, bio, color, preset, image, frame_id) in agents {
             let ratings = self.agent_ratings(id).await?;
-            listed.push(json!({"id": id, "name": name, "model_label": model, "ratings": ratings}));
+            let look = crate::cosmetics::Appearance {
+                title: title.clone(),
+                color,
+                avatar_preset: preset,
+                avatar_image: image,
+                frame_id,
+            };
+            listed.push(json!({
+                "id": id,
+                "name": name,
+                "model_label": model,
+                "title": title,
+                "bio": bio,
+                "look": crate::cosmetics::appearance_json(id, &look),
+                "ratings": ratings,
+            }));
         }
         let recent = self.recent_matches_for_user(user.0).await?;
         Ok(
@@ -1748,8 +1807,24 @@ impl App {
     }
 
     pub async fn agent_profile(&self, id: Uuid) -> Result<Value, CallError> {
-        let row = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>, String)>(
-            r#"SELECT a.id, a.name, a.description, a.model_label, u.handle
+        let row = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                String,
+                Option<String>,
+                Option<String>,
+                String,
+                Option<String>,
+                Option<String>,
+                String,
+                String,
+                bool,
+                Option<String>,
+            ),
+        >(
+            r#"SELECT a.id, a.name, a.description, a.model_label, u.handle,
+                      a.title, a.bio, a.color, a.avatar_preset, a.avatar_image, a.frame_id
                FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = $1"#,
         )
         .bind(id)
@@ -1759,8 +1834,24 @@ impl App {
         .ok_or_else(|| CallError::new(404, "not_found", "没有这个智能体"))?;
         let ratings = self.agent_ratings(id).await?;
         let recent = self.recent_matches_for_agent(id).await?;
+        let look = crate::cosmetics::Appearance {
+            title: row.5.clone(),
+            color: row.7.clone(),
+            avatar_preset: row.8.clone(),
+            avatar_image: row.9,
+            frame_id: row.10.clone(),
+        };
         Ok(json!({
-            "agent": {"id": row.0, "name": row.1, "description": row.2, "model_label": row.3, "handle": row.4},
+            "agent": {
+                "id": row.0,
+                "name": row.1,
+                "description": row.2,
+                "model_label": row.3,
+                "handle": row.4,
+                "title": row.5,
+                "bio": row.6,
+                "look": crate::cosmetics::appearance_json(id, &look),
+            },
             "ratings": ratings,
             "recent": recent,
         }))
@@ -1992,8 +2083,8 @@ impl App {
         .map_err(db_err)?;
         let mut out = Vec::new();
         for (id, game_id, game_name, status, room_code, variant, tip_seq, state) in rows {
-            let seats = sqlx::query_as::<_, (i16, String, String)>(
-                r#"SELECT mp.seat, a.name, u.handle
+            let seats = sqlx::query_as::<_, (i16, Uuid, String, String, Option<String>, String, String, bool, Option<String>)>(
+                r#"SELECT mp.seat, a.id, a.name, u.handle, a.title, a.color, a.avatar_preset, a.avatar_image, a.frame_id
                    FROM match_players mp
                    JOIN agents a ON a.id = mp.agent_id
                    JOIN users u ON u.id = mp.owner_id
@@ -2003,6 +2094,10 @@ impl App {
             .fetch_all(self.pool())
             .await
             .map_err(db_err)?;
+            let ids: Vec<Uuid> = seats.iter().map(|row| row.1).collect();
+            let equipped = crate::cosmetics::loadouts(self.pool(), &game_id, &ids)
+                .await
+                .map_err(|err| CallError::new(500, "cosmetics", err.to_string()))?;
             let preview = state.as_ref().and_then(|s| {
                 registry().get(&game_id).and_then(|g| {
                     g.view(
@@ -2024,7 +2119,26 @@ impl App {
                 "variant": variant,
                 "tip_seq": tip_seq,
                 "viewer_count": self.inner.hub.slot(id).viewers.load(std::sync::atomic::Ordering::Relaxed),
-                "seats": seats.into_iter().map(|(seat, name, handle)| json!({"seat": seat, "agent_name": name, "owner_handle": handle})).collect::<Vec<_>>(),
+                "seats": seats.into_iter().map(|(seat, agent_id, name, handle, title, color, preset, image, frame_id)| {
+                    let appearance = crate::cosmetics::Appearance {
+                        title,
+                        color,
+                        avatar_preset: preset,
+                        avatar_image: image,
+                        frame_id,
+                    };
+                    let mut look = crate::cosmetics::seat_look(&game_id, &appearance, None);
+                    if let Some(equip) = equipped.get(&agent_id) {
+                        crate::cosmetics::overlay(&mut look, equip);
+                    }
+                    json!({
+                        "seat": seat,
+                        "agent_id": agent_id,
+                        "agent_name": name,
+                        "owner_handle": handle,
+                        "look": look.to_json(agent_id),
+                    })
+                }).collect::<Vec<_>>(),
                 "view": preview,
             }));
         }
