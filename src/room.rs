@@ -456,7 +456,10 @@ impl Engine {
             anyhow::bail!("seat is missing a registered key");
         }
         let mut seed = [0u8; 32];
-        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut seed);
+        rand::Rng::fill_bytes(
+            &mut rand::rand_core::UnwrapErr(rand::rngs::SysRng),
+            &mut seed,
+        );
         self.seed = seed;
         self.seed_hex = hex::encode(seed);
         self.seed_commit = crate::crypto::sha256_hex(&seed);

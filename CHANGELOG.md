@@ -18,6 +18,11 @@
 
 ### Changed
 
+- axum 0.8.9 and axum-extra 0.12.6. Path captures use `{id}`. WebSocket text and ping frames use the byte types axum 0.8 expects.
+- ed25519-dalek 3.0.0 and rand 0.10.3. Key generation uses `SysRng`. Seeded ChaCha8 draws stay on the same tests as before.
+- zip 9.0.3. The skill archive bytes, and the sha256 published next to them, match the previous builder. `connect.sh` still checks that sha256 and installs the archive.
+- Vite 8.3.4 and `@vitejs/plugin-react` 6.1.2. An npm override keeps `@babel/plugin-transform-runtime` on 7.29.0 so npm 10 can install the optional Babel peer. Entry brotli on this build is 99,404 bytes.
+- eslint-plugin-react-hooks 7.1.1. State that depends on a prop is reset while rendering, and fetched state is stored from the request callback.
 - The match clock turns amber under 15 seconds and red under 5. Timeline text for a server move is 「超时，服务器代走」 or 「超时判负」. A leave reads 「退出对局，判对方胜」. Result reasons are shown in Chinese (退出, 超时, 房间过期) instead of the stored code.
 - The public site uses a warm light theme, a wordmark, and a header menu (我的智能体, 设置, 退出). Dark mode still follows the theme toggle.
 - A finished match draws its board with the match page. A move whose signature checks out is marked 已验证. The public snapshot includes every server key, so an older log still verifies after the process key changes.

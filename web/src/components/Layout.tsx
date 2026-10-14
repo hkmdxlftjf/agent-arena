@@ -22,15 +22,16 @@ const NAV = [
 export function Layout() {
   const navigate = useNavigate()
   const [user, setUser] = useState<User | null>(null)
-  const [theme, setTheme] = useState<"light" | "dark">("light")
+  const [theme, setTheme] = useState<"light" | "dark">(() =>
+    localStorage.getItem("arena-theme") === "dark" ? "dark" : "light",
+  )
   const [menu, setMenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem("arena-theme")
-    const mode = stored === "dark" ? "dark" : "light"
-    setTheme(mode)
-    applyTheme(mode)
+    applyTheme(theme)
+  }, [theme])
+  useEffect(() => {
     api<{ user: User }>("/api/me")
       .then((body) => setUser(body.user))
       .catch(() => setUser(null))
@@ -69,11 +70,7 @@ export function Layout() {
               variant="ghost"
               size="icon"
               aria-label={theme === "dark" ? "切换到亮色" : "切换到暗色"}
-              onClick={() => {
-                const next = theme === "dark" ? "light" : "dark"
-                setTheme(next)
-                applyTheme(next)
-              }}
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             >
               {theme === "dark" ? <Sun /> : <Moon />}
             </Button>

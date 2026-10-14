@@ -31,7 +31,7 @@ pub fn router(app: App) -> Router {
                 .get(crate::mcp::mcp_get)
                 .delete(crate::mcp::mcp_delete),
         )
-        .route("/ws/match/:id", get(ws_match))
+        .route("/ws/match/{id}", get(ws_match))
         .route("/api/auth/register", post(register))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
@@ -43,27 +43,27 @@ pub fn router(app: App) -> Router {
         .route("/connect.ps1", get(connect_ps1))
         .route("/api/me", get(me))
         .route("/api/agents", get(list_agents).post(create_agent))
-        .route("/api/agents/:id/tokens", post(issue_token))
+        .route("/api/agents/{id}/tokens", post(issue_token))
         .route(
-            "/api/agents/:id/tokens/:tid",
+            "/api/agents/{id}/tokens/{tid}",
             axum::routing::delete(revoke_token),
         )
         .route("/api/games", get(games))
-        .route("/api/games/:id", get(game))
-        .route("/api/games/:id/unpublish", post(unpublish_game))
-        .route("/api/games/:id/hide", post(hide_game))
+        .route("/api/games/{id}", get(game))
+        .route("/api/games/{id}/unpublish", post(unpublish_game))
+        .route("/api/games/{id}/hide", post(hide_game))
         .route("/api/uploads/check", post(check_rules))
         .route("/api/uploads/publish", post(publish_rules))
         .route("/sdk/game.ts", get(sdk_ts))
         .route("/examples/tic-tac-toe.js", get(example_js))
         .route("/api/matches", get(matches))
-        .route("/api/matches/:id", get(match_one))
-        .route("/api/matches/:id/leave", post(leave_match))
-        .route("/api/matches/:id/log.jsonl", get(match_log))
+        .route("/api/matches/{id}", get(match_one))
+        .route("/api/matches/{id}/leave", post(leave_match))
+        .route("/api/matches/{id}/log.jsonl", get(match_log))
         .route("/api/leaderboard", get(leaderboard))
-        .route("/api/users/:handle", get(user_profile))
-        .route("/api/agents/:id/profile", get(agent_profile))
-        .route("/ws/leaderboard/:game", get(ws_leaderboard))
+        .route("/api/users/{handle}", get(user_profile))
+        .route("/api/agents/{id}/profile", get(agent_profile))
+        .route("/ws/leaderboard/{game}", get(ws_leaderboard))
         .route("/.well-known/arena-keys.json", get(keys_doc))
         .route("/.well-known/arena-skill.json", get(skill_doc))
         .route("/skill/arena-skill-v1.0.0.zip", get(skill_zip))
@@ -409,7 +409,7 @@ async fn leaderboard_socket(app: App, game: String, mut socket: WebSocket) {
                 let text = body.to_string();
                 if text != last {
                     last = text.clone();
-                    if socket.send(Message::Text(json!({"type":"leaderboard","data": body}).to_string())).await.is_err() {
+                    if socket.send(Message::Text(json!({"type":"leaderboard","data": body}).to_string().into())).await.is_err() {
                         break;
                     }
                 }
@@ -439,13 +439,13 @@ async fn handle_socket(
     if let Ok(snap) = app.public_match(id).await {
         let _ = socket
             .send(Message::Text(
-                json!({"type":"snapshot","data": snap}).to_string(),
+                json!({"type":"snapshot","data": snap}).to_string().into(),
             ))
             .await;
     }
     let _ = socket
         .send(Message::Text(
-            json!({"type":"viewers","count": n}).to_string(),
+            json!({"type":"viewers","count": n}).to_string().into(),
         ))
         .await;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(30));
@@ -463,19 +463,19 @@ async fn handle_socket(
             ev = rx.recv() => {
                 match ev {
                     Ok(text) => {
-                        if socket.send(Message::Text(text)).await.is_err() { break; }
+                        if socket.send(Message::Text(text.into())).await.is_err() { break; }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                         if let Ok(snap) = app.public_match(id).await {
                             let msg = json!({"type":"snapshot","data": snap}).to_string();
-                            if socket.send(Message::Text(msg)).await.is_err() { break; }
+                            if socket.send(Message::Text(msg.into())).await.is_err() { break; }
                         }
                     }
                     Err(_) => break,
                 }
             }
             _ = ping.tick() => {
-                if socket.send(Message::Ping(Vec::new())).await.is_err() { break; }
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break; }
             }
         }
     }

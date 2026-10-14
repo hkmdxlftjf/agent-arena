@@ -6,7 +6,8 @@ use crate::canon::canon;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use base64::Engine;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use rand::rngs::OsRng;
+use rand::rand_core::UnwrapErr;
+use rand::rngs::SysRng;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -172,7 +173,7 @@ pub struct ServerKey {
 
 impl ServerKey {
     pub fn generate() -> Self {
-        let signing = SigningKey::generate(&mut OsRng);
+        let signing = SigningKey::generate(&mut UnwrapErr(SysRng));
         Self::from_signing(signing)
     }
 
@@ -246,7 +247,7 @@ mod tests {
 
     #[test]
     fn sign_then_verify() {
-        let sk = SigningKey::generate(&mut OsRng);
+        let sk = SigningKey::generate(&mut UnwrapErr(SysRng));
         let key = ServerKey::from_signing(sk);
         let d = domain("agent.idou.bid", "move");
         let p = json!({"match_id": "m", "seat": 0, "seq": 1});

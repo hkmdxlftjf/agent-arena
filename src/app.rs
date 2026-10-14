@@ -10,11 +10,12 @@ use crate::error::CallError;
 use crate::game::registry;
 use crate::room::{roundtrip, shutdown_room, spawn_room, Cmd, Engine, Hub, Slot};
 use argon2::password_hash::{
-    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+    rand_core::{OsRng, RngCore},
+    PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
 };
 use argon2::Argon2;
 use chrono::{DateTime, Duration, Utc};
-use rand::{Rng, RngCore};
+use rand::RngExt;
 use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::HashMap;
@@ -1330,9 +1331,9 @@ impl App {
         const ALPH: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         for _ in 0..8 {
             let code: String = {
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 (0..6)
-                    .map(|_| ALPH[rng.gen_range(0..ALPH.len())] as char)
+                    .map(|_| ALPH[rng.random_range(0..ALPH.len())] as char)
                     .collect()
             };
             let exists: Option<Uuid> =

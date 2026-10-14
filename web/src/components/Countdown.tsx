@@ -18,7 +18,10 @@ export function Countdown({
     return () => window.clearInterval(id)
   }, [])
   useEffect(() => {
-    if (serverTime) setAnchor({ server: serverTime, local: Date.now() })
+    if (!serverTime) return
+    const local = Date.now()
+    const id = window.setTimeout(() => setAnchor({ server: serverTime, local }), 0)
+    return () => window.clearTimeout(id)
   }, [serverTime])
 
   const serverNow = anchor.server + (now - anchor.local)

@@ -16,7 +16,14 @@ export function Leaderboard() {
   const [body, setBody] = useState<Payload | null>(null)
   const [error, setError] = useState("")
   const [delta, setDelta] = useState<Record<string, number>>({})
+  const [shownGame, setShownGame] = useState(game)
   const previous = useRef<Record<string, number>>({})
+  if (shownGame !== game) {
+    setShownGame(game)
+    setBody(null)
+    setDelta({})
+    setError("")
+  }
 
   useEffect(() => {
     let closed = false
@@ -44,7 +51,6 @@ export function Leaderboard() {
         })
     }
     previous.current = {}
-    setBody(null)
     load()
     const proto = location.protocol === "https:" ? "wss" : "ws"
     try {
