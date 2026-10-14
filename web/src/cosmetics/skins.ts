@@ -1,6 +1,6 @@
 export type StonePaint = { fill: string; stroke: string; mark: string }
 
-const PAPER = { fill: "#f3e6c8", line: "#8a7b6a", label: "#6b6258", river: "#f3d7b5", edge: "#c4a574" }
+const PAPER = { fill: "#e8e8d0", line: "rgb(20 36 8 / 64%)", label: "#3f4a32", river: "#dddcc4", edge: "#709050" }
 
 export function boardPaint(theme?: string | null) {
   if (theme === "celadon") {

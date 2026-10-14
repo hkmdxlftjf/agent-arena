@@ -90,7 +90,7 @@ export function CardTable({
 }) {
   const seats = [1, 2, 0]
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-[#f6efe4] p-3 dark:bg-[#1a1612]">
+    <div className="space-y-3 rounded-2xl border border-border bg-[var(--board-fill)] p-3">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>{phase === "bid" ? `叫分中 · 当前 ${bid || "未叫"}` : phase === "play" ? "出牌" : "终局"}</span>
         <span>倍数 ×{multiplier}</span>

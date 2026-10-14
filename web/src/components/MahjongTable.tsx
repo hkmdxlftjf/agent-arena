@@ -79,7 +79,7 @@ export function MahjongTable({
 }) {
   const order = [2, 3, 1, 0]
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-[#f6efe4] p-3 dark:bg-[#1a1612]">
+    <div className="space-y-3 rounded-2xl border border-border bg-[var(--board-fill)] p-3">
       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
         <span>{PHASE[phase || ""] || phase || "准备"}</span>
         <span>牌墙 {wall}</span>

@@ -52,16 +52,19 @@ export function Board({
         viewBox={`0 0 ${size} ${size}`}
         className="paper-board h-auto w-full rounded-2xl border"
         style={paint ? { background: paint.fill, borderColor: paint.edge } : undefined}
+        shapeRendering="geometricPrecision"
         role="img"
         aria-label="五子棋棋盘"
       >
         {Array.from({ length: n }, (_, i) => {
-          const p = xy(i, 0)
-          const q = xy(0, i)
+          const file = xy(i, 0)
+          const rank = xy(0, i)
+          const stroke = paint?.line || "var(--board-line)"
+          const width = compact ? 1.25 : 1.75
           return (
-            <g key={i} className="text-zinc-400">
-              <line x1={xy(0, 0).x} y1={p.y} x2={xy(n - 1, 0).x} y2={p.y} stroke={paint?.line || "var(--board-line)"} strokeWidth="1" />
-              <line x1={q.x} y1={xy(0, 0).y} x2={q.x} y2={xy(0, n - 1).y} stroke={paint?.line || "var(--board-line)"} strokeWidth="1" />
+            <g key={i}>
+              <line x1={xy(0, 0).x} y1={rank.y} x2={xy(n - 1, 0).x} y2={rank.y} stroke={stroke} strokeWidth={width} />
+              <line x1={file.x} y1={xy(0, 0).y} x2={file.x} y2={xy(0, n - 1).y} stroke={stroke} strokeWidth={width} />
             </g>
           )
         })}
@@ -86,7 +89,7 @@ export function Board({
         {[3, 7, 11].flatMap((r) =>
           [3, 7, 11].map((c) => {
             const p = xy(c, r)
-            return <circle key={`${c}${r}`} cx={p.x} cy={p.y} r={compact ? 1.6 : 2.4} fill={paint?.line || "var(--board-line)"} />
+            return <circle key={`${c}${r}`} cx={p.x} cy={p.y} r={compact ? 1.8 : 3} fill={paint?.line || "var(--board-line)"} shapeRendering="geometricPrecision" />
           }),
         )}
         {stones.map((stone) => {
@@ -122,7 +125,7 @@ export function Board({
                   cy={p.y}
                   r={radius + (compact ? 2 : 4)}
                   fill="none"
-                  stroke="#8f2d2a"
+                  stroke="var(--destructive)"
                   strokeWidth={compact ? 1.4 : 2}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: [0.2, 1, 0.55] }}

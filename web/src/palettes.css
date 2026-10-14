@@ -1,6 +1,10 @@
 /*
-  Light-theme proposals. The default (no data-palette) stays the current theme.
-  Switch with ?theme=lichess|chess|linear|kaggle. Nothing here copies logos or assets.
+  Optional palettes. The default (no data-palette) is the chess.com direction:
+  page #f4f1e4, text #312e2b, green #81b64c, board #e8e8d0 / #709050, 5px corners.
+  Switch with ?theme=lichess|linear|kaggle|warm. ?theme=chess, default, or off
+  clears the switch. Nothing here copies logos or assets.
+
+  warm — the previous paper and cinnabar theme, kept so it can be removed later.
 
   lichess — lichess.org light theme, measured 2026-10-14, plus their published tokens
   in ui/lib/css/theme (page #edebe9, text #4d4d4d, primary hsl(209 77% 46%) = #1b78d0,
@@ -105,7 +109,7 @@ html[data-palette="chess"] {
   --jade: #3f6b28;
   --gold: #81b64c;
   --board-fill: #e8e8d0;
-  --board-line: #709050;
+  --board-line: rgb(20 36 8 / 64%);
   --board-label: #3f4a32;
   --board-edge: #709050;
   --board-frame: linear-gradient(180deg, #e8e8d0, #d5d6b8);
@@ -270,4 +274,63 @@ html[data-palette="chess"] .hero {
 html[data-palette="kaggle"] .hero {
   border-bottom: 1px solid var(--border);
   padding-bottom: 1.5rem;
+}
+
+html[data-palette="warm"] {
+  --background: #f3eee6;
+  --foreground: #1c1612;
+  --card: #fffaf3;
+  --card-foreground: #1c1612;
+  --popover: #fffaf3;
+  --popover-foreground: #1c1612;
+  --primary: #8f2d2a;
+  --primary-foreground: #fff8f4;
+  --secondary: #efe4d2;
+  --secondary-foreground: #2a2118;
+  --muted: #e8dfd1;
+  --muted-foreground: #5c5348;
+  --accent: #efe4d2;
+  --accent-foreground: #2a2118;
+  --destructive: #9f2d2d;
+  --border: #e0d3c2;
+  --input: #e0d3c2;
+  --ring: #8f2d2a;
+  --live: #1f7a4d;
+  --warn: #8f5c00;
+  --wood: #b98548;
+  --ink: #243038;
+  --jade: #2f6b57;
+  --gold: #8a6a2f;
+  --board-fill: radial-gradient(circle at 18% 0%, rgb(255 255 255 / 55%), transparent 42%), linear-gradient(180deg, #f8f1e6, #efe2cf);
+  --board-line: #8a7b6a;
+  --board-label: #6b6258;
+  --board-edge: #c4a574;
+  --board-frame: radial-gradient(circle at 18% 0%, rgb(255 255 255 / 28%), transparent 36%), linear-gradient(160deg, #f0d7b0, #c99562 58%, #a87440);
+  --code-bg: #2a241e;
+  --code-fg: #f6efe4;
+  --shadow-card: 0 1px 2px rgb(48 32 16 / 6%), 0 10px 28px rgb(48 32 16 / 7%);
+  --shadow-lift: 0 10px 24px rgb(48 32 16 / 12%);
+  --chart-1: #8f2d2a;
+  --chart-2: #2f6b57;
+  --chart-3: #b98548;
+  --chart-4: #243038;
+  --chart-5: #8a6a2f;
+  --radius: 0.75rem;
+  font-family: Inter, "Geist Variable", "PingFang SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+html[data-palette="warm"] body {
+  background-image:
+    radial-gradient(circle at 12% -10%, rgb(185 133 72 / 16%), transparent 32%),
+    radial-gradient(circle at 100% 0%, rgb(143 45 42 / 8%), transparent 26%);
+}
+
+html[data-palette="warm"] .nav-link {
+  border-radius: 999px;
+  font-weight: 400;
+}
+
+html[data-palette="warm"] h1 {
+  font-weight: 600;
+  letter-spacing: -0.03em;
 }
