@@ -3,7 +3,7 @@ import { RoomCodeForm } from "@/components/RoomCodeForm"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import type { User } from "@/lib/types"
-import { Moon, Sun } from "lucide-react"
+import { Bot, LogOut, Moon, Settings, Sun } from "lucide-react"
 import { lazy, Suspense, useEffect, useRef, useState } from "react"
 import { syncPalette } from "@/palette"
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
@@ -16,17 +16,31 @@ function applyTheme(mode: "light" | "dark") {
 }
 
 const NAV = [
+  ["/", "大厅"],
   ["/games", "游戏"],
   ["/leaderboard", "排行"],
   ["/docs/connect", "接入"],
 ] as const
+
+function NavItems({ wide = false }: { wide?: boolean }) {
+  return NAV.map(([to, label]) => (
+    <NavLink
+      key={to}
+      to={to}
+      end={to === "/"}
+      className={({ isActive }) => `nav-link shrink-0 text-center ${wide ? "flex-1" : ""} ${isActive ? "nav-link-active" : ""}`}
+    >
+      {label}
+    </NavLink>
+  ))
+}
 
 export function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [user, setUser] = useState<User | null>(null)
   const [theme, setTheme] = useState<"light" | "dark">(() =>
-    localStorage.getItem("arena-theme") === "dark" ? "dark" : "light",
+    localStorage.getItem("arena-theme") === "light" ? "light" : "dark",
   )
   const [menu, setMenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -58,21 +72,24 @@ export function Layout() {
   }, [menu])
 
   return (
-    <div className="flex min-h-svh flex-col bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-3 md:px-8">
+    <div className="relative flex min-h-svh flex-col text-foreground">
+      <div className="lobby-backdrop" aria-hidden="true" />
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:rounded-lg focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:text-primary-foreground"
+      >
+        跳到主要内容
+      </a>
+      <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 md:px-8">
           <Logo />
-          <nav className="flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="主导航">
-            {NAV.map(([to, label]) => (
-              <NavLink key={to} to={to} className={({ isActive }) => `nav-link shrink-0 ${isActive ? "nav-link-active" : ""}`}>
-                {label}
-              </NavLink>
-            ))}
+          <nav className="ml-4 hidden items-center gap-1 md:flex" aria-label="主导航">
+            <NavItems />
           </nav>
-          <div className="ml-auto hidden items-center gap-1.5 md:flex">
+          <div className="ml-auto hidden items-center gap-1.5 lg:flex">
             <RoomCodeForm compact />
           </div>
-          <div className="ml-auto flex items-center gap-1.5 md:ml-0">
+          <div className="ml-auto flex items-center gap-1.5 lg:ml-0">
             <Button
               variant="ghost"
               size="icon"
@@ -90,23 +107,25 @@ export function Layout() {
                   aria-haspopup="menu"
                   onClick={() => setMenu((open) => !open)}
                 >
-                  <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
+                  <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
                     {user.handle.slice(0, 1).toUpperCase()}
                   </span>
                   <span className="hidden max-w-24 truncate font-data text-xs sm:inline">{user.handle}</span>
                 </Button>
                 {menu && (
                   <div className="user-menu" role="menu">
-                    <Link role="menuitem" className="block rounded-md px-3 py-2 text-sm hover:bg-muted" to="/agents" onClick={() => setMenu(false)}>
+                    <Link role="menuitem" className="menu-item flex items-center gap-2" to="/agents" onClick={() => setMenu(false)}>
+                      <Bot className="size-4 text-muted-foreground" aria-hidden />
                       我的智能体
                     </Link>
-                    <Link role="menuitem" className="block rounded-md px-3 py-2 text-sm hover:bg-muted" to="/agents#account" onClick={() => setMenu(false)}>
+                    <Link role="menuitem" className="menu-item flex items-center gap-2" to="/agents#account" onClick={() => setMenu(false)}>
+                      <Settings className="size-4 text-muted-foreground" aria-hidden />
                       设置
                     </Link>
                     <button
                       role="menuitem"
                       type="button"
-                      className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                      className="menu-item flex items-center gap-2"
                       onClick={async () => {
                         await api("/api/auth/logout", { method: "POST" })
                         setUser(null)
@@ -114,6 +133,7 @@ export function Layout() {
                         navigate("/")
                       }}
                     >
+                      <LogOut className="size-4 text-muted-foreground" aria-hidden />
                       退出
                     </button>
                   </div>
@@ -124,21 +144,27 @@ export function Layout() {
             )}
           </div>
         </div>
+        <nav className="mx-auto flex max-w-6xl gap-1 px-3 pb-2 md:hidden" aria-label="主导航（移动）">
+          <NavItems wide />
+        </nav>
       </header>
-      <div className="flex-1">
-        <Suspense fallback={<div className="skeleton mx-auto mt-8 h-48 max-w-6xl" />}>
+      <div id="main" className="flex-1" tabIndex={-1}>
+        <Suspense fallback={<div className="mx-auto max-w-6xl px-4 pt-8 md:px-8"><div className="skeleton h-48" /></div>}>
           <PageFrame>
             <Outlet context={{ user, setUser }} />
           </PageFrame>
         </Suspense>
       </div>
-      <footer className="mt-8 border-t border-border">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between md:px-8">
-          <p>游戏大厅 · 智能体对局，步骤可以公开核验。</p>
-          <nav className="flex gap-4" aria-label="页脚">
-            <Link to="/games" className="hover:text-foreground">游戏</Link>
-            <Link to="/leaderboard" className="hover:text-foreground">排行</Link>
-            <Link to="/docs/connect" className="hover:text-foreground">接入</Link>
+      <footer className="mt-12 border-t border-border bg-background/60">
+        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between md:px-8">
+          <div className="flex items-center gap-3">
+            <Logo compact />
+            <p>智能体对局，每一步签名都可以公开核验。</p>
+          </div>
+          <nav className="flex gap-5" aria-label="页脚">
+            <Link to="/games" className="-my-1.5 py-1.5 transition-colors hover:text-foreground">游戏</Link>
+            <Link to="/leaderboard" className="-my-1.5 py-1.5 transition-colors hover:text-foreground">排行</Link>
+            <Link to="/docs/connect" className="-my-1.5 py-1.5 transition-colors hover:text-foreground">接入</Link>
           </nav>
         </div>
       </footer>
