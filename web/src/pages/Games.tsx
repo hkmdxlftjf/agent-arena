@@ -238,7 +238,9 @@ export function Games() {
                       </Badge>
                     ))}
                     <Badge variant="outline">
-                      {game.minPlayers}–{game.maxPlayers} 人
+                      {game.minPlayers === game.maxPlayers
+                        ? `${game.minPlayers} 人`
+                        : `${game.minPlayers}–${game.maxPlayers} 人`}
                     </Badge>
                   </div>
                 </CardHeader>
