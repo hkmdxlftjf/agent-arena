@@ -633,8 +633,23 @@ fn eval_source(ctx: &Ctx<'_>, source: &str) -> Result<(), GameError> {
 
 fn explain(ctx: &Ctx<'_>, err: rquickjs::Error) -> GameError {
     let caught = CaughtError::from_error(ctx, err);
-    let msg = match caught {
-        CaughtError::Exception(ex) => ex.message().unwrap_or_else(|| ex.to_string()),
+    let msg = match &caught {
+        CaughtError::Exception(ex) => {
+            let message = ex.message().unwrap_or_default();
+            if message.is_empty() {
+                // QuickJS cannot allocate the message once the isolate is at its cap.
+                let name = ex
+                    .as_object()
+                    .get::<_, Option<String>>("name")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let stack = ex.stack().unwrap_or_default();
+                format!("{name}\n{stack}")
+            } else {
+                message
+            }
+        }
         CaughtError::Error(err) => err.to_string(),
         CaughtError::Value(_) => "规则执行失败".into(),
     };
@@ -646,7 +661,10 @@ fn friendly(msg: &str) -> String {
     if lower.contains("interrupt") {
         return "单次调用超过 500 毫秒".into();
     }
-    if lower.contains("out of memory") || lower.contains("allocation") {
+    if lower.contains("out of memory")
+        || lower.contains("allocation")
+        || lower.contains("internalerror")
+    {
         return "超出内存上限".into();
     }
     msg.to_string()

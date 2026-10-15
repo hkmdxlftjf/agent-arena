@@ -9,13 +9,11 @@ use crate::crypto::{
 use crate::error::CallError;
 use crate::game::registry;
 use crate::room::{roundtrip, shutdown_room, spawn_room, Cmd, Engine, Hub, Slot};
-use argon2::password_hash::{
-    rand_core::{OsRng, RngCore},
-    PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
-};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::Argon2;
 use chrono::{DateTime, Duration, Utc};
-use rand::RngExt;
+use rand::{Rng, RngExt};
 use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::HashMap;
@@ -374,7 +372,7 @@ impl App {
             .execute(self.pool())
             .await;
         let mut raw = [0u8; 32];
-        OsRng.fill_bytes(&mut raw);
+        rand::rng().fill_bytes(&mut raw);
         let state = hex::encode(raw);
         sqlx::query("INSERT INTO oauth_states (state, purpose, user_id, expires_at) VALUES ($1, $2, $3, $4)")
             .bind(&state)
@@ -635,7 +633,7 @@ impl App {
 
     pub(crate) async fn create_session(&self, user_id: Uuid) -> Result<String, CallError> {
         let mut raw = [0u8; 32];
-        OsRng.fill_bytes(&mut raw);
+        rand::rng().fill_bytes(&mut raw);
         let sid = hex::encode(raw);
         sqlx::query("INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)")
             .bind(&sid)
@@ -806,7 +804,7 @@ impl App {
     pub async fn issue_token(&self, user: &User, agent_id: Uuid) -> Result<Value, CallError> {
         self.owned_agent(user, agent_id).await?;
         let mut raw = [0u8; 32];
-        OsRng.fill_bytes(&mut raw);
+        rand::rng().fill_bytes(&mut raw);
         let token = format!("aa_live_{}_{}", agent_id.simple(), b64url_encode(&raw));
         let hash = sha256(token.as_bytes());
         let prefix = format!("{}…{}", &token[..16], &token[token.len() - 4..]);
@@ -991,7 +989,7 @@ impl App {
     pub async fn key_challenge(&self, agent: &AgentCtx) -> Result<Value, CallError> {
         let id = Uuid::new_v4();
         let mut nonce = [0u8; 32];
-        OsRng.fill_bytes(&mut nonce);
+        rand::rng().fill_bytes(&mut nonce);
         let nonce_hex = hex::encode(nonce);
         let expires = Utc::now() + Duration::minutes(10);
         let payload = json!({
@@ -2798,20 +2796,28 @@ impl App {
             .execute(self.pool())
             .await
             .map_err(db_err)?;
-        let (column, limit, message) = if publish {
-            ("publishes", 10, "今天的发布次数已用完（每天 10 次）")
-        } else {
-            ("checks", 40, "今天的校验次数已用完（每天 40 次）")
-        };
-        let sql = format!(
-            "UPDATE upload_quotas SET {column} = {column} + 1 WHERE user_id = $1 AND day = CURRENT_DATE AND {column} < $2 RETURNING {column}"
-        );
-        let updated: Option<i32> = sqlx::query_scalar(&sql)
+        // The column is chosen here, not from a request string, so each statement stays a literal.
+        let (message, updated) = if publish {
+            let updated: Option<i32> = sqlx::query_scalar(
+                "UPDATE upload_quotas SET publishes = publishes + 1 WHERE user_id = $1 AND day = CURRENT_DATE AND publishes < $2 RETURNING publishes",
+            )
             .bind(user_id)
-            .bind(limit)
+            .bind(10_i32)
             .fetch_optional(self.pool())
             .await
             .map_err(db_err)?;
+            ("今天的发布次数已用完（每天 10 次）", updated)
+        } else {
+            let updated: Option<i32> = sqlx::query_scalar(
+                "UPDATE upload_quotas SET checks = checks + 1 WHERE user_id = $1 AND day = CURRENT_DATE AND checks < $2 RETURNING checks",
+            )
+            .bind(user_id)
+            .bind(40_i32)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?;
+            ("今天的校验次数已用完（每天 40 次）", updated)
+        };
         if updated.is_none() {
             return Err(CallError::new(429, "quota", message));
         }
@@ -2885,9 +2891,8 @@ fn hash_password(password: &str) -> Result<String, CallError> {
     if password.len() < 8 {
         return Err(CallError::new(400, "weak_password", "密码至少 8 位"));
     }
-    let salt = SaltString::generate(&mut OsRng);
     let hash = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|err| CallError::new(500, "hash", err.to_string()))?;
     Ok(hash.to_string())
 }
@@ -3016,5 +3021,26 @@ mod handle_tests {
         let suffixed = suffixed_handle(&long, 2);
         assert!(valid_handle(&suffixed));
         assert!(suffixed.ends_with('2'));
+    }
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::{hash_password, verify_password};
+
+    #[test]
+    fn new_hashes_verify_and_phc_strings_still_parse() {
+        let hash = hash_password("correct-horse").unwrap();
+        assert!(
+            hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"),
+            "{hash}"
+        );
+        assert!(verify_password(&hash, "correct-horse"));
+        assert!(!verify_password(&hash, "wrong-horse"));
+        // PHC string from the Argon2 reference tests. Stored 0.5 hashes use the same encoding.
+        let legacy = "$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc";
+        assert!(verify_password(legacy, "password"));
+        assert!(!verify_password(legacy, "sassword"));
+        assert!(!verify_password("not-a-hash", "password"));
     }
 }
