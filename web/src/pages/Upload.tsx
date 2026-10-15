@@ -5,11 +5,12 @@ import { api, ApiError } from "@/lib/api"
 import Editor, { loader, type Monaco } from "@monaco-editor/react"
 import * as monaco from "monaco-editor"
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker"
+import tsWorker from "monaco-editor/language/typescript/ts.worker.js?worker"
 import { useEffect, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 
 self.MonacoEnvironment = {
-  getWorker: () => new editorWorker(),
+  getWorker: (_id: string, label: string) => (label === "typescript" || label === "javascript" ? new tsWorker() : new editorWorker()),
 }
 loader.config({ monaco })
 
@@ -55,7 +56,7 @@ export function Upload() {
       colors: { "editor.background": "#FFFFFF" },
     })
     if (sdk) {
-      instance.languages.typescript.javascriptDefaults.addExtraLib(sdk, "file:///game.d.ts")
+      monaco.typescript.javascriptDefaults.addExtraLib(sdk, "file:///game.d.ts")
     }
   }
 
