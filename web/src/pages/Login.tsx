@@ -1,3 +1,4 @@
+import { Particles } from "@/components/Ambient"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -5,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
 import { authError } from "@/lib/authErrors"
 import type { User } from "@/lib/types"
+import { Loader2, LogIn } from "lucide-react"
 import type { FormEvent } from "react"
 import { useState } from "react"
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom"
@@ -32,16 +34,22 @@ export function Login() {
   }
 
   return (
-    <main className="mx-auto grid max-w-md px-4 py-12">
-      <Card>
-        <CardHeader>
-          <CardTitle>进入游戏大厅</CardTitle>
+    <main className="relative isolate mx-auto grid max-w-md px-4 py-10 md:py-16">
+      <div className="pointer-events-none absolute inset-x-0 -top-6 -z-10 h-[30rem] overflow-hidden [mask-image:radial-gradient(closest-side,black,transparent)]" aria-hidden>
+        <Particles />
+      </div>
+      <Card className="stage pop-in border border-border">
+        <CardHeader className="text-center">
+          <span className="mx-auto mb-2 grid size-12 place-items-center rounded-2xl bg-accent text-accent-foreground">
+            <LogIn className="size-5" aria-hidden />
+          </span>
+          <CardTitle className="text-xl font-bold">进入游戏大厅</CardTitle>
           <CardDescription>邮箱和密码就够了。第一个注册的账号会成为管理员。</CardDescription>
         </CardHeader>
         <CardContent>
           <a
             href="/auth/github"
-            className="mb-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-card text-sm font-medium text-foreground hover:bg-muted"
+            className="mb-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-secondary text-sm font-medium text-foreground transition-[background-color,transform] hover:bg-muted active:scale-[0.98]"
           >
             <svg viewBox="0 0 16 16" className="size-4" aria-hidden="true">
               <path
@@ -51,6 +59,11 @@ export function Login() {
             </svg>
             使用 GitHub 登录
           </a>
+          <div className="mb-4 flex items-center gap-3 text-xs text-muted-foreground" aria-hidden>
+            <span className="h-px flex-1 bg-border" />
+            或用邮箱
+            <span className="h-px flex-1 bg-border" />
+          </div>
           <Tabs defaultValue="login">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="login">登录</TabsTrigger>
@@ -78,7 +91,11 @@ export function Login() {
               />
             </TabsContent>
           </Tabs>
-          {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+          {error && (
+            <p className="alert-error pop-in mt-3" role="alert">
+              {error}
+            </p>
+          )}
         </CardContent>
       </Card>
     </main>
@@ -105,11 +122,12 @@ function Form({
     <form className="mt-4 space-y-3" onSubmit={handle}>
       {fields.map(([key, label, type]) => (
         <label key={key} className="block text-sm">
-          <span className="mb-1 block text-muted-foreground">{label}</span>
-          <Input name={key} type={type} required autoComplete={key === "password" ? "current-password" : "username"} />
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
+          <Input name={key} type={type} required autoComplete={key === "password" ? "current-password" : "username"} className="h-10" />
         </label>
       ))}
-      <Button type="submit" disabled={pending} className="w-full">
+      <Button type="submit" size="lg" disabled={pending} className="w-full">
+        {pending && <Loader2 className="animate-spin" aria-hidden />}
         {pending ? "提交中…" : "继续"}
       </Button>
     </form>

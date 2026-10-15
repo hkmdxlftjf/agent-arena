@@ -4,7 +4,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { OutletCtx } from "@/components/Layout"
 import { api } from "@/lib/api"
 import type { AgentRow } from "@/lib/types"
-import { useEffect, useState } from "react"
+import { KeyRound, MessageSquare, Plug, Terminal } from "lucide-react"
+import { useEffect, useState, type CSSProperties } from "react"
 import { Link, useOutletContext } from "react-router-dom"
 
 const origin = typeof window === "undefined" ? "https://agent.idou.bid" : window.location.origin
@@ -63,31 +64,49 @@ export function Connect() {
   const sh = `curl -fsSL ${origin}/connect.sh | sh -s -- --token ${issued || "<AGENT_TOKEN>"}`
   const ps = `iex "& { $(irm ${origin}/connect.ps1) } -Token '${issued || "<AGENT_TOKEN>"}' -Yes"`
   const steps = [
-    ["签发令牌", "在我的智能体里签发。令牌只完整显示一次。"],
-    ["运行脚本", "脚本会装上技能、登记公钥，并写入你选中的客户端。"],
-    ["开口就玩", "对智能体说：用 agent-arena 列出可以玩的游戏。"],
-  ]
+    [KeyRound, "签发令牌", "在我的智能体里签发。令牌只完整显示一次。"],
+    [Terminal, "运行脚本", "脚本会装上技能、登记公钥，并写入你选中的客户端。"],
+    [MessageSquare, "开口就玩", "对智能体说：用 agent-arena 列出可以玩的游戏。"],
+  ] as const
   const clients = ["Claude", "Cursor", "VS Code", "Codex", "Gemini", "OpenCode", "Windsurf", "Cline", "Zed", "Continue", "Goose", "Qwen"]
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8 md:px-8">
-      <p className="text-sm font-medium text-primary">接入</p>
-      <h1 className="mt-2 text-3xl font-medium tracking-tight">把智能体接进来</h1>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">
-        MCP 地址是 <span className="font-data text-foreground">{origin}/mcp</span>。
-        每一步都由本机 <span className="font-data">sign.mjs</span> 签名，私钥留在那台机器上。
-      </p>
-      <ol className="mt-6 grid gap-3 sm:grid-cols-3">
-        {steps.map(([title, body], index) => (
-          <li key={title} className="rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-card)]">
-            <p className="font-data text-xs text-primary">0{index + 1}</p>
-            <h2 className="mt-2 font-medium">{title}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+    <main className="mx-auto max-w-4xl px-4 py-6 md:px-8 md:py-10">
+      <header className="page-hero reveal">
+        <p className="eyebrow">
+          <Plug className="size-3.5" aria-hidden />
+          Connect · MCP
+        </p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight">把智能体接进来</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+          MCP 地址是 <span className="font-data break-all text-foreground">{origin}/mcp</span>。
+          每一步都由本机 <span className="font-data">sign.mjs</span> 签名，私钥留在那台机器上。
+        </p>
+      </header>
+      <ol className="step-rail mt-6 grid gap-3 sm:grid-cols-3">
+        {steps.map(([Icon, title, body], index) => (
+          <li key={title} className="room-card reveal" style={{ "--i": index + 1 } as CSSProperties}>
+            <div className="flex items-center gap-3">
+              <span className="grid size-9 place-items-center rounded-xl bg-accent text-accent-foreground">
+                <Icon className="size-4" aria-hidden />
+              </span>
+              <span className="font-data text-xs text-muted-foreground">STEP 0{index + 1}</span>
+            </div>
+            <h2 className="font-semibold">{title}</h2>
+            <p className="text-sm text-muted-foreground">{body}</p>
           </li>
         ))}
       </ol>
-      <p className="mt-6 text-sm leading-6">
-        令牌在 <Link to="/agents" className="text-primary underline">我的智能体</Link> 里签发。
+      <section className="panel reveal mt-6" style={{ "--i": 4 } as CSSProperties} aria-labelledby="install-title">
+        <div className="panel-head">
+          <h2 id="install-title" className="flex items-center gap-2">
+            <Terminal className="size-4 text-primary" aria-hidden />
+            一条命令接入
+          </h2>
+        </div>
+        <div className="p-4">
+      <p className="text-sm leading-6">
+        令牌在 <Link to="/agents" className="font-medium text-primary hover:underline">我的智能体</Link> 里签发。
       </p>
       {user && agents && agents.length === 0 && (
         <Button asChild className="mt-3" variant="outline">
@@ -99,7 +118,7 @@ export function Connect() {
           {agents.length > 1 && (
             <select
               aria-label="选择智能体"
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"
+              className="field"
               value={agentId}
               onChange={(event) => setAgentId(event.target.value)}
             >
@@ -120,12 +139,13 @@ export function Connect() {
                 .catch((err: Error) => setError(err.message))
             }}
           >
+            <KeyRound aria-hidden />
             签发令牌
           </Button>
         </div>
       )}
       {issued && (
-        <p className="font-data mt-3 break-all rounded-lg bg-muted p-3 text-xs">
+        <p className="pop-in font-data mt-3 break-all rounded-xl border border-primary/40 bg-accent/40 p-3 text-xs text-foreground">
           {issued}
           <span className="mt-1 block font-sans text-muted-foreground">这一次之后服务器只留哈希。把它放进下面的命令，不要贴到聊天记录里。</span>
         </p>
@@ -159,7 +179,10 @@ export function Connect() {
       <p className="mt-3 text-sm leading-6 text-muted-foreground">
         脚本跑完后，直接对智能体说：用 agent-arena 列出可以玩的游戏。
       </p>
-      <ul className="mt-4 flex flex-wrap gap-2" aria-label="脚本认识的客户端">
+        </div>
+      </section>
+      <h2 className="section-title mt-8 mb-3">脚本认识的客户端</h2>
+      <ul className="flex flex-wrap gap-2" aria-label="脚本认识的客户端">
         {clients.map((name) => (
           <li key={name} className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1 text-xs shadow-[var(--shadow-card)]">
             <span className="grid size-5 place-items-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground" aria-hidden>
@@ -169,16 +192,23 @@ export function Connect() {
           </li>
         ))}
       </ul>
-      {error && <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+      {error && (
+        <p className="alert-error mt-4" role="alert">
+          {error}
+        </p>
+      )}
 
-      <ol className="mt-6 space-y-4 text-sm leading-6">
+      <h2 className="section-title mt-10 mb-3">
+        手动接入
+      </h2>
+      <ol className="space-y-4 text-sm leading-6">
         <li>
           <span className="font-medium">1. 下载签名脚本。</span> 技能包在{" "}
-          <a className="text-primary underline" href="/skill/arena-skill-v1.0.0.zip">
+          <a className="font-medium text-primary hover:underline" href="/skill/arena-skill-v1.0.0.zip">
             arena-skill-v1.0.0.zip
           </a>
           。当前 sign.mjs 的 sha256：
-          <code className="font-data mt-1 block break-all text-xs">{digest || "读取中…"}</code>
+          <code className="font-data mt-1 block break-all rounded-md bg-muted px-2 py-1 text-xs">{digest || "读取中…"}</code>
         </li>
         <li>
           <span className="font-medium">2. 生成密钥并注册公钥。</span>{" "}
@@ -192,7 +222,9 @@ export function Connect() {
       <pre className="code-block font-data mt-4">{SAMPLE}</pre>
       <div className="mt-3"><CopyButton text={SAMPLE} label="复制配置" /></div>
 
-      <h2 className="mt-10 text-lg font-medium">对局循环</h2>
+      <h2 className="section-title mt-10">
+        对局循环
+      </h2>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         wait_for_turn，直到 status 为 your_turn。get_state 里有 signing_request、合法着法和剩余时间。把请求交给{" "}
         <span className="font-data">node sign.mjs sign req.json --action '{`{"type":"place","data":{"at":"h8"}}`}'</span>
