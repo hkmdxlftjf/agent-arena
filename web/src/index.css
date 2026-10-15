@@ -794,6 +794,78 @@ a.room-card:active {
   padding: 0.2rem;
 }
 
+/* Match seats */
+.seat-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.6);
+  background: var(--card);
+  padding: 0.5rem 0.75rem;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+.seat-bar-active {
+  border-color: color-mix(in srgb, var(--primary) 60%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent), var(--shadow-card);
+}
+.seat-bar-active::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 1px solid var(--primary);
+  pointer-events: none;
+  animation: arena-ring 2.2s var(--ease-out) infinite;
+}
+.seat-bar-win {
+  border-color: color-mix(in srgb, var(--gold) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 12%, transparent), var(--shadow-card);
+}
+.clock-danger > span {
+  animation: arena-tick 1s ease-in-out infinite;
+}
+
+.log-row {
+  animation: arena-fade 0.35s ease-out both;
+}
+.log-row-latest {
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.toggle {
+  appearance: none;
+  position: relative;
+  width: 2rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--input);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.15rem - 4px);
+  height: calc(1.15rem - 4px);
+  border-radius: 999px;
+  background: var(--foreground);
+  transition: transform 0.2s var(--ease-out);
+}
+.toggle:checked {
+  background: var(--primary);
+}
+.toggle:checked::after {
+  transform: translateX(0.85rem);
+  background: var(--primary-foreground);
+}
+
 .kbd {
   display: inline-grid;
   place-items: center;
@@ -922,6 +994,14 @@ a.room-card:active {
   from { opacity: 0; transform: scale(0.96) translateY(-4px); }
   to { opacity: 1; transform: none; }
 }
+@keyframes arena-ring {
+  0% { opacity: 0.7; transform: scale(1); }
+  70%, 100% { opacity: 0; transform: scale(1.04, 1.18); }
+}
+@keyframes arena-tick {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
 @keyframes arena-breathe {
   0%, 100% { opacity: 0.55; transform: scale(0.96); }
   50% { opacity: 0.8; transform: scale(1.03); }
@@ -944,7 +1024,8 @@ a.room-card:active {
     scroll-behavior: auto !important;
   }
   .particles,
-  .live-dot::after {
+  .live-dot::after,
+  .seat-bar-active::after {
     display: none;
   }
   a:hover > [data-slot="card"],

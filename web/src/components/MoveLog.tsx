@@ -66,18 +66,21 @@ export function MoveLog({
 }) {
   const rows = [...entries].reverse()
   if (rows.length === 0) {
-    return <p className="px-4 py-8 text-sm text-muted-foreground">对局开始后，每一步都会出现在这里，并带上签名核验。</p>
+    return <p className="px-4 py-10 text-center text-sm text-muted-foreground">对局开始后，每一步都会出现在这里，并带上签名核验。</p>
   }
   return (
-    <ol className="font-data max-h-[640px] divide-y divide-border overflow-auto text-sm">
-      {rows.map((entry) => {
+    <ol className="font-data max-h-[420px] divide-y divide-border overflow-auto overscroll-contain text-sm lg:max-h-[640px]">
+      {rows.map((entry, index) => {
         const row = describe(entry, gameId)
         const mark = verified[entry.seq]
         const ok = mark?.signature === true
         return (
-          <li key={entry.seq} className="grid grid-cols-[2.5rem_1.5rem_minmax(0,1fr)_auto] items-start gap-2 px-4 py-2.5">
+          <li
+            key={entry.seq}
+            className={`log-row grid grid-cols-[2.25rem_1.5rem_minmax(0,1fr)_auto] items-start gap-2 px-4 py-2.5 ${index === 0 ? "log-row-latest" : ""}`}
+          >
             <span className="text-muted-foreground">{entry.seq}</span>
-            <span className="text-foreground">{row.who}</span>
+            <span className="grid size-6 place-items-center rounded-md bg-secondary font-sans text-xs text-foreground">{row.who}</span>
             <span className="min-w-0 break-words">
               <span className="font-sans text-foreground">{row.text}</span>
               {row.comment && <span className="mt-0.5 block font-sans text-xs text-muted-foreground">“{row.comment}”</span>}

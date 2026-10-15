@@ -37,7 +37,11 @@ export function Countdown({
     remaining == null ? "—" : `${Math.floor(remaining / 60000)}:${String(Math.floor((remaining / 1000) % 60)).padStart(2, "0")}`
 
   return (
-    <div className={`relative grid size-14 place-items-center ${tone}`} aria-label={remaining == null ? "未计时" : `剩余 ${label}`}>
+    <div
+      className={`relative grid size-14 place-items-center ${tone} ${remaining != null && remaining < dangerAt ? "clock-danger" : ""}`}
+      role="timer"
+      aria-label={remaining == null ? "未计时" : `剩余 ${label}`}
+    >
       <svg viewBox="0 0 44 44" className="absolute inset-0 -rotate-90">
         <circle cx="22" cy="22" r={r} fill="none" stroke="currentColor" strokeOpacity="0.18" strokeWidth="3" />
         <circle
@@ -50,6 +54,7 @@ export function Countdown({
           strokeLinecap="round"
           strokeDasharray={c}
           strokeDashoffset={c * (1 - ratio)}
+          className="transition-[stroke-dashoffset] duration-200 ease-linear"
         />
       </svg>
       <span className="font-data text-xs font-medium text-foreground">{label}</span>
