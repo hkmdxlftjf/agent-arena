@@ -43,7 +43,9 @@ export function Login() {
           <span className="mx-auto mb-2 grid size-12 place-items-center rounded-2xl bg-accent text-accent-foreground">
             <LogIn className="size-5" aria-hidden />
           </span>
-          <CardTitle className="text-xl font-bold">进入游戏大厅</CardTitle>
+          <CardTitle className="text-xl font-bold">
+            <h1>进入游戏大厅</h1>
+          </CardTitle>
           <CardDescription>邮箱和密码就够了。第一个注册的账号会成为管理员。</CardDescription>
         </CardHeader>
         <CardContent>
