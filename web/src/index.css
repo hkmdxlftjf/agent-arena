@@ -760,6 +760,23 @@ a.room-card:active {
 .rank-2 { color: #1a1f29; background: linear-gradient(160deg, #eef2f8, #aab4c4); }
 .rank-3 { color: #2a1406; background: linear-gradient(160deg, #f4b98a, #b9703f); }
 
+.podium-step {
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: calc(var(--radius) * 1.2) calc(var(--radius) * 1.2) 0 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 10%, var(--card)), var(--card));
+  transition: transform 0.25s var(--ease-out);
+}
+.podium[data-place="1"] .podium-step {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 22%, var(--card)), var(--card));
+  box-shadow: 0 -10px 30px -18px var(--gold);
+}
+@media (hover: hover) {
+  .podium:hover .podium-step {
+    transform: translateY(-3px);
+  }
+}
+
 .row-hover {
   transition: background-color 0.15s;
 }
