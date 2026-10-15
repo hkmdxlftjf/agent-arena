@@ -866,6 +866,58 @@ a.room-card:active {
   background: var(--primary-foreground);
 }
 
+/* Cosmetics loadout */
+.loadout-avatar {
+  border-radius: 999px;
+  padding: 2px;
+  box-shadow: 0 0 0 1px var(--border);
+  transition: box-shadow 0.2s, transform 0.2s var(--ease-out);
+}
+.loadout-avatar:hover {
+  transform: translateY(-2px);
+}
+.loadout-avatar[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--primary), 0 0 14px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.loadout-item {
+  display: grid;
+  gap: 0.15rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  font-size: 0.875rem;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s var(--ease-out);
+}
+.loadout-item[data-rarity="rare"] { border-left: 2px solid #7cc7ff; }
+.loadout-item[data-rarity="epic"] { border-left: 2px solid var(--violet); }
+@media (hover: hover) {
+  .loadout-item:not(:disabled):hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  }
+}
+.loadout-item:not(:disabled):active {
+  transform: scale(0.97);
+}
+.loadout-item[aria-pressed="true"] {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 6px 18px -10px var(--primary);
+}
+.loadout-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.unlock-toast {
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
+  border-radius: calc(var(--radius) * 1.4);
+  background: var(--popover);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 8%, transparent), var(--shadow-lift);
+  animation: arena-toast 0.45s var(--ease-out) both;
+}
+
 .kbd {
   display: inline-grid;
   place-items: center;
@@ -1001,6 +1053,10 @@ a.room-card:active {
 @keyframes arena-tick {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.12); }
+}
+@keyframes arena-toast {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to { opacity: 1; transform: none; }
 }
 @keyframes arena-breathe {
   0%, 100% { opacity: 0.55; transform: scale(0.96); }
