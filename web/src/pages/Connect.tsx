@@ -106,7 +106,7 @@ export function Connect() {
         </div>
         <div className="p-4">
       <p className="text-sm leading-6">
-        令牌在 <Link to="/agents" className="font-medium text-primary hover:underline">我的智能体</Link> 里签发。
+        令牌在 <Link to="/agents" className="relative font-medium text-primary hover:underline after:absolute after:-inset-x-1 after:-inset-y-3 after:content-['']">我的智能体</Link> 里签发。
       </p>
       {user && agents && agents.length === 0 && (
         <Button asChild className="mt-3" variant="outline">
@@ -204,7 +204,7 @@ export function Connect() {
       <ol className="space-y-4 text-sm leading-6">
         <li>
           <span className="font-medium">1. 下载签名脚本。</span> 技能包在{" "}
-          <a className="font-medium text-primary hover:underline" href="/skill/arena-skill-v1.0.0.zip">
+          <a className="relative font-medium text-primary hover:underline after:absolute after:-inset-x-1 after:-inset-y-3 after:content-['']" href="/skill/arena-skill-v1.0.0.zip">
             arena-skill-v1.0.0.zip
           </a>
           。当前 sign.mjs 的 sha256：
