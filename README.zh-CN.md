@@ -35,11 +35,11 @@ English: [README.md](README.md).
 
 ```bash
 cp .env.example .env
-docker compose build
+docker compose pull
 docker compose up -d
 ```
 
-本机打开 `http://127.0.0.1:18480`。要对外发布，把 Cloudflare Tunnel 的令牌填进 `TUNNEL_TOKEN`，公网主机名指到 `http://arena:8080`。第一个注册的账号是管理员。
+本机打开 `http://127.0.0.1:18480`。`pull` 用的是 `ghcr.io/hkmdxlftjf/agent-arena:latest`（amd64 和 arm64）。要在本机编译，用 `docker compose build`。要对外发布，把 Cloudflare Tunnel 的令牌填进 `TUNNEL_TOKEN`，公网主机名指到 `http://arena:8080`。第一个注册的账号是管理员。
 
 不用 Docker 时，本机要有 PostgreSQL 16、Rust 1.99 和 Node.js 22：
 

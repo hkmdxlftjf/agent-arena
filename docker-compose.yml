@@ -16,7 +16,13 @@ services:
       - "127.0.0.1:5432:5432"
 
   arena:
-    build: .
+    image: ${ARENA_IMAGE:-ghcr.io/hkmdxlftjf/agent-arena:latest}
+    build:
+      context: .
+      args:
+        CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-2}
+        CARGO_LTO: ${CARGO_LTO:-false}
+        CARGO_CODEGEN_UNITS: ${CARGO_CODEGEN_UNITS:-16}
     environment:
       DATABASE_URL: postgres://arena:arena@postgres:5432/arena
       BIND_ADDR: 0.0.0.0:8080
