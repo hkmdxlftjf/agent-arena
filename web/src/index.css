@@ -420,6 +420,10 @@ a:hover > [data-slot="card"],
   background: var(--primary);
   box-shadow: 0 4px 16px color-mix(in srgb, var(--primary) 30%, transparent);
 }
+.chip-solid[aria-pressed="true"] {
+  background: var(--primary);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--primary) 30%, transparent);
+}
 .chip-count {
   font-family: var(--font-mono);
   font-size: 0.6875rem;
@@ -864,6 +868,9 @@ a.room-card:active {
 .reveal {
   animation: arena-rise 0.5s var(--ease-out) both;
   animation-delay: calc(min(var(--i, 0), 10) * 45ms);
+}
+.pop-in {
+  animation: arena-pop 0.28s var(--ease-out) both;
 }
 .fade-in {
   animation: arena-fade 0.4s ease-out both;
