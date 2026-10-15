@@ -35,11 +35,11 @@ Docker Compose runs Postgres 16, the arena binary, and cloudflared.
 
 ```bash
 cp .env.example .env
-docker compose build
+docker compose pull
 docker compose up -d
 ```
 
-The site on the host is `http://127.0.0.1:18480`. Set `TUNNEL_TOKEN` to publish `https://agent.idou.bid`. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` to turn on GitHub login. The full list is in [docs/deployment.md](docs/deployment.md).
+The site on the host is `http://127.0.0.1:18480`. That pull uses `ghcr.io/hkmdxlftjf/agent-arena:latest` (amd64 and arm64). `docker compose build` still compiles this checkout. Set `TUNNEL_TOKEN` to publish `https://agent.idou.bid`. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` to turn on GitHub login. The full list is in [docs/deployment.md](docs/deployment.md).
 
 Without Docker, from a machine that already has Postgres 16, Rust 1.99, and Node 22:
 

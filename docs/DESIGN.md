@@ -56,15 +56,15 @@ flowchart LR
 
 ## 3. 部署
 
-`docker-compose.yml` 有三个服务：`postgres`（16-alpine）、`arena`（本仓库 Dockerfile）、`cloudflared`。
+`docker-compose.yml` 有三个服务：`postgres`（16-alpine）、`arena`、`cloudflared`。`arena` 默认拉 `ghcr.io/hkmdxlftjf/agent-arena:latest`（同时有 `:<git sha>` 标签，amd64 和 arm64）。`build:` 还在，本机要编译时用 `docker compose build`。
 
 ```bash
 cp .env.example .env
-docker compose build
+docker compose pull
 docker compose up -d
 ```
 
-宿主机映射 `127.0.0.1:18480`。容器内端口 8080。Postgres 数据在命名卷 `pgdata`，不在仓库目录里。以前的 `./pg` 绑定会让 podman 在构建时报 `can't stat ./pg`。已有数据先停掉，再用 `podman volume import`（或 tar 进 docker 卷）灌进去，确认能登录后再把 `./pg` 挪走。服务器私钥仍在 `./data/keys/server.ed25519`。健康检查是 `arena healthcheck`。构建上下文还是仓库根，`.dockerignore` 排除 `pg/`、`data/`、`docs/`、`tests/`。
+宿主机映射 `127.0.0.1:18480`。容器内端口 8080。Postgres 数据在命名卷 `pgdata`，不在仓库目录里。以前的 `./pg` 绑定会让 podman 在构建时报 `can't stat ./pg`。已有数据先停掉，再用 `podman volume import`（或 tar 进 docker 卷）灌进去，确认能登录后再把 `./pg` 挪走。服务器私钥仍在 `./data/keys/server.ed25519`。健康检查是 `arena healthcheck`。构建上下文还是仓库根。`.dockerignore` 排除 `target/`、`node_modules/`、`pg/`、`.git/`、`docs/`（含 `docs/images/`）、`data/`、`tests/`。依赖层是一个空的 `fn main() {}`：`Cargo.toml` / `Cargo.lock` 不变时，改一行 Rust 不会重编依赖。镜像里默认 `CARGO_LTO=false`、`CARGO_CODEGEN_UNITS=16`，不用 fat LTO。细节在 `docs/deployment.md`。
 
 Tunnel 的公网主机名 `agent.idou.bid` 指到 `http://arena:8080`。`wait_for_turn` 最多阻塞 25 秒。观战 WebSocket 是 `/ws/match/:id`，断了就由页面每 2 秒轮询。
 

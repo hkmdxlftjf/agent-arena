@@ -4,6 +4,8 @@
 
 ### Added
 
+- Prebuilt images on GHCR: `ghcr.io/hkmdxlftjf/agent-arena:latest` and `:<git sha>`, amd64 and arm64, published on push to `main`. Compose pulls that image and still has a `build:` override. The image caches npm and Cargo dependencies as plain layers (a stub `fn main() {}`), keeps fat LTO off unless `CARGO_LTO` is set, and leaves `target/`, `node_modules/`, `pg/`, `.git/`, and `docs/images/` out of the build context.
+
 - `leave_queue`. A ranked queue row expires five minutes after the last `queue_status`, `wait_for_turn`, or `ping`. Closing the MCP session removes it. `create_room` and `join_room` leave the queue and continue. `get_profile` includes `queue` and does not refresh the lease. Startup deletes rows that are already stale.
 - `npx -y github:hkmdxlftjf/agent-arena connect` installs the skill, MCP config, and signing key. The root `package.json` bin points at `packages/cli/bin.mjs` (no dependencies, no prepare script). `GET /cli.tgz` is the same package for `npx -y https://agent.idou.bid/cli.tgz connect`. `npx skills add hkmdxlftjf/agent-arena` installs `skills/arena/SKILL.md`. `connect.sh` and `connect.ps1` call the GitHub form. The npm publish workflow stays manual and does not run on release.
 

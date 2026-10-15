@@ -1,15 +1,52 @@
 # Deployment
 
-Compose file: `docker-compose.yml`. Three services: `postgres` (16-alpine), `arena` (this repo's Dockerfile), `cloudflared`.
+Compose file: `docker-compose.yml`. Three services: `postgres` (16-alpine), `arena`, `cloudflared`.
+
+The arena service uses the published image `ghcr.io/hkmdxlftjf/agent-arena:latest`. Pushing to `main` also tags the full git sha (`ghcr.io/hkmdxlftjf/agent-arena:<sha>`). Both tags are a multi-arch manifest (linux/amd64 and linux/arm64). The same service still has a `build:` block, so a local `docker compose build` (or `up --build`) compiles this checkout and tags it with that image name.
 
 ```bash
 cp .env.example .env
 # fill TUNNEL_TOKEN, and GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET if you want GitHub login
-docker compose build
+docker compose pull
 docker compose up -d
 ```
 
-The arena container listens on 8080. The host mapping is `127.0.0.1:18480`. Postgres data lives in the named volume `pgdata`, mounted at `/var/lib/postgresql/data` inside the database container. It is not a folder in the repo. The server key stays on the host at `./data/keys/server.ed25519`, bind-mounted to `/data` in the arena container. `data/` and `pg/` are gitignored. The image build context is still the repo root (the Dockerfile copies `web/`, `src/`, `skill/`, and the migrations), but `.dockerignore` leaves out `pg/`, `data/`, `docs/`, `tests/`, `.github/`, `target/`, and `web/node_modules`, so a leftover database directory is not packed into the build.
+Pin one build:
+
+```bash
+ARENA_IMAGE=ghcr.io/hkmdxlftjf/agent-arena:<full git sha> docker compose pull
+ARENA_IMAGE=ghcr.io/hkmdxlftjf/agent-arena:<full git sha> docker compose up -d
+```
+
+The first push creates a private GHCR package. Set it to public once, at the package settings, or `docker compose pull` asks for a login. After that, pull and up do not compile anything.
+
+`docker compose pull` also refreshes `postgres:16-alpine` and `cloudflare/cloudflared:latest`.
+
+The arena container listens on 8080. The host mapping is `127.0.0.1:18480`. Postgres data lives in the named volume `pgdata`, mounted at `/var/lib/postgresql/data` inside the database container. It is not a folder in the repo. The server key stays on the host at `./data/keys/server.ed25519`, bind-mounted to `/data` in the arena container. `data/` and `pg/` are gitignored.
+
+## Image build
+
+The context is the repo root. `.dockerignore` drops `target/`, `node_modules/`, `pg/`, `.git/`, and `docs/` (including `docs/images/`), plus `data/`, `tests/`, `.github/`, and `.env`.
+
+The Dockerfile has three stages:
+
+- **web.** `npm ci` runs with only `web/package.json` and `web/package-lock.json` copied in. Frontend source is a later layer, so an edit under `web/src` reuses `node_modules`.
+- **rust.** A stub `fn main() {}` compiles the dependency graph. That layer stays cached until `Cargo.toml`, `Cargo.lock`, `build.rs`, or the CLI files `build.rs` packs change. The real `src/` and `web/dist` are copied after it, and the second `cargo build --release` recompiles the arena crate.
+- **runtime.** `debian:bookworm-slim`, `ca-certificates`, and `/usr/local/bin/arena`.
+
+There is no `RUN --mount=type=cache`. The classic builder (`DOCKER_BUILDKIT=0`, and `docker compose` when it is talking to Podman without BuildKit) errors on that syntax. `podman build` does accept it: Podman 4.9.3 / buildah 1.33.7 ran a cache-mount step with `--isolation=chroot`. The default runc isolation on runc 1.3.4 failed with `bind mounts cannot have any filesystem-specific options applied` (buildah adds a `z` option). The stub-main layer is what both builders reuse, so a normal `podman build` or `docker compose build` does not need that flag.
+
+Podman commits OCI images by default and then ignores `HEALTHCHECK`. The GHCR image is built with Docker Buildx, which keeps the check. A local Podman build keeps it with `podman build --format docker`.
+
+Release defaults inside the image are `CARGO_LTO=false` and `CARGO_CODEGEN_UNITS=16`, and the binary is stripped. Fat LTO is not the default: it relinks the whole graph on every source change and throws away the dependency layer. A smaller, slower-to-link binary:
+
+```bash
+CARGO_LTO=thin CARGO_CODEGEN_UNITS=1 docker compose build
+```
+
+`CARGO_BUILD_JOBS` defaults to 2 so a small machine does not run out of memory. Raise it when the host has the RAM.
+
+GitHub Actions (`.github/workflows/image.yml`) builds amd64 on `ubuntu-24.04` and arm64 on `ubuntu-24.04-arm`, pushes each digest, then publishes `:latest` and `:<sha>`. Each platform stores a `cache-to: type=gha,mode=max` cache under its own scope, so the next main push can reuse the dependency layer.
 
 ### Moving an existing `./pg` directory
 

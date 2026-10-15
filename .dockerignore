@@ -1,13 +1,26 @@
+# Build products and installed dependency trees.
 target
-web/node_modules
+node_modules
+**/node_modules
 web/dist
+
+# Host data. A missing or huge pg/ used to break the context scan.
 pg
 pg/
 data
 data/
+
 .git
+**/.git
 .github
+
+# Images are the bulky part of docs/. The rest of docs/ is unused by the image.
 docs
+docs/images
+
 tests
 uploads
 *.log
+
+.env
+*.ed25519
