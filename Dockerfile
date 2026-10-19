@@ -3,13 +3,19 @@
 FROM node:26-bookworm-slim AS web
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY web/ ./
 RUN npm run build
 
 FROM rust:1.99-bookworm AS rust
 WORKDIR /src
-COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+# The image ships the newest 1.99.x, while rust-toolchain.toml pins an exact
+# release. Install that toolchain in its own layer: otherwise every build that
+# invalidates the cargo layer re-downloads it before compiling.
+COPY rust-toolchain.toml ./
+RUN rustup toolchain install "$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)" \
+        --profile minimal --no-self-update
+COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY migrations ./migrations
 COPY skills ./skills
@@ -19,14 +25,17 @@ COPY sdk ./sdk
 COPY package.json LICENSE ./
 COPY packages/cli ./packages/cli
 COPY src ./src
-ENV CARGO_BUILD_JOBS=2
-RUN cargo build --release
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release \
+    && mkdir -p /out \
+    && cp target/release/arena /out/arena
 
 FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=rust /src/target/release/arena /usr/local/bin/arena
+COPY --from=rust /out/arena /usr/local/bin/arena
 ENV BIND_ADDR=0.0.0.0:8080 \
     DATA_DIR=/data \
     PUBLIC_URL=https://arena.idou.top \
