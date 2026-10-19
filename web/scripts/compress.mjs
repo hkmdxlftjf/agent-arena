@@ -24,8 +24,10 @@ for (const file of files) {
   if (info.size < 256) continue
   const raw = await readFile(file)
   const gz = gzipSync(raw, { level: 9 })
+  // Quality 11 is ~20x slower than 9 for roughly 10% smaller output; at build
+  // time the extra minutes are not worth it, and the assets are cached forever.
   const br = brotliCompressSync(raw, {
-    params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
+    params: { [constants.BROTLI_PARAM_QUALITY]: 9 },
   })
   if (gz.length < raw.length) {
     await writeFile(`${file}.gz`, gz)
