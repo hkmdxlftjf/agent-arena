@@ -7,6 +7,7 @@ const file = process.argv[3];
 const url = process.argv[4];
 const dry = process.argv[5] === "1";
 const token = process.env.ARENA_CONNECT_TOKEN || "";
+const local = process.env.ARENA_CONNECT_LOCAL ? JSON.parse(process.env.ARENA_CONNECT_LOCAL) : null;
 
 if (!dry && !token) {
   console.error("缺少令牌");
@@ -94,12 +95,12 @@ function stripJsonc(input) {
 
 function readJson(target) {
   const text = readText(target).trim();
-  if (!text) return {};
+  if (!text) return { doc: {}, jsonc: false };
   try {
-    return JSON.parse(text);
+    return { doc: JSON.parse(text), jsonc: false };
   } catch (err) {
     try {
-      return JSON.parse(stripJsonc(text));
+      return { doc: JSON.parse(stripJsonc(text)), jsonc: true };
     } catch (err2) {
       console.error("配置文件不是 JSON 对象");
       process.exit(1);
@@ -140,6 +141,21 @@ function rootKey(name) {
 
 function buildEntry(name, prev) {
   const base = prev && typeof prev === "object" && !Array.isArray(prev) ? Object.assign({}, prev) : {};
+  if (local) {
+    for (const key of ["url", "httpUrl", "serverUrl", "headers", "oauth", "command", "args", "env", "environment", "type"]) delete base[key];
+    if (name === "opencode") {
+      delete base.enabled;
+      delete base.disabled;
+      delete base.timeout;
+      delete base.protocol;
+      return Object.assign(base, {
+        type: "local", command: [local.command, ...local.args], environment: local.env,
+      });
+    }
+    return Object.assign(base, { command: local.command, args: local.args, env: local.env },
+      name === "vscode" || name === "cline" || name === "roo" ? { type: "stdio" } : {},
+      name === "cline" || name === "roo" ? { disabled: false } : {});
+  }
   const headers = Object.assign({}, base.headers || {}, { Authorization: auth });
   if (name === "claude-desktop") {
     return {
@@ -164,17 +180,76 @@ function buildEntry(name, prev) {
   return Object.assign(base, { url, headers });
 }
 
+const OPENCODE_PERMISSIONS = {
+  external_directory: { "~/.arena/**": "allow" },
+  bash: { "node *sign.mjs*": "allow" },
+};
+
+function mergeRules(existing, ours) {
+  if (typeof existing === "string") return Object.assign({ "*": existing }, ours);
+  if (existing && typeof existing === "object" && !Array.isArray(existing)) return Object.assign({}, existing, ours);
+  return Object.assign({}, ours);
+}
+
+function mergeOpenCodePermission(perm) {
+  const merged = perm && typeof perm === "object" && !Array.isArray(perm) ? Object.assign({}, perm) : {};
+  for (const [name, rules] of Object.entries(OPENCODE_PERMISSIONS)) {
+    merged[name] = mergeRules(merged[name], rules);
+  }
+  return merged;
+}
+
+function openCodePermissionOk(perm) {
+  if (!perm || typeof perm !== "object" || Array.isArray(perm)) return false;
+  for (const [name, rules] of Object.entries(OPENCODE_PERMISSIONS)) {
+    const cur = perm[name];
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) return false;
+    for (const [pattern, effect] of Object.entries(rules)) {
+      if (cur[pattern] !== effect) return false;
+    }
+  }
+  return true;
+}
+
 function writeJson() {
-  const doc = readJson(file);
+  const parsed = readJson(file);
+  const doc = parsed.doc;
   if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
     console.error("配置文件不是 JSON 对象");
     process.exit(1);
   }
   const key = rootKey(client);
   if (!doc[key] || typeof doc[key] !== "object" || Array.isArray(doc[key])) doc[key] = {};
-  const prev = doc[key]["agent-arena"] && typeof doc[key]["agent-arena"] === "object" ? doc[key]["agent-arena"] : {};
+  let servers = doc[key];
+  let v2 = false;
+  if (local && client === "opencode") {
+    // Explicit layout wins over the installed binary. An empty config follows
+    // its installed major, defaulting to the current V2 layout if unavailable.
+    const mcp = doc.mcp;
+    const direct = Object.values(mcp).some((entry) => entry && typeof entry === "object" && ["local", "remote"].includes(entry.type));
+    const major = (process.env.ARENA_CONNECT_OPENCODE_VERSION || "").match(/^(?:v)?(\d+)\./);
+    v2 = Object.hasOwn(mcp, "servers") || (!direct && (!major || Number(major[1]) >= 2));
+    if (v2) {
+      if (!mcp.servers || typeof mcp.servers !== "object" || Array.isArray(mcp.servers)) mcp.servers = {};
+      servers = mcp.servers;
+    }
+  }
+  const prev = servers["agent-arena"] && typeof servers["agent-arena"] === "object" ? servers["agent-arena"] : {};
   const next = buildEntry(client, prev);
-  if (!dry && JSON.stringify(prev) === JSON.stringify(next)) {
+  if (local && client === "opencode") {
+    Object.assign(next, v2 ? {
+      disabled: false, protocol: "legacy",
+      timeout: { startup: 30000, catalog: 30000, execution: 660000 },
+    } : { enabled: true, timeout: 660000 });
+  }
+  let permOk = true;
+  if (client === "opencode" && !local) {
+    if (typeof doc.permission !== "string") {
+      doc.permission = mergeOpenCodePermission(doc.permission);
+      permOk = openCodePermissionOk(doc.permission);
+    }
+  }
+  if (!dry && JSON.stringify(prev) === JSON.stringify(next) && permOk) {
     console.log("unchanged");
     return;
   }
@@ -182,9 +257,13 @@ function writeJson() {
     console.log("would-write");
     return;
   }
-  doc[key]["agent-arena"] = next;
+  servers["agent-arena"] = next;
   const prevNorm = readText(file).replace(/\r\n/g, "\n");
-  finish(file, JSON.stringify(doc, null, 2) + "\n", prevNorm);
+  const nextText = JSON.stringify(doc, null, 2) + "\n";
+  if (parsed.jsonc && nextText !== prevNorm) {
+    console.error("提示: 配置文件含注释或尾随逗号，重写为严格 JSON；原始内容保留在 .bak 备份中");
+  }
+  finish(file, nextText, prevNorm);
 }
 
 function tomlQuote(value) {
@@ -192,6 +271,13 @@ function tomlQuote(value) {
 }
 
 function desiredToml() {
+  if (local) return [
+    "[mcp_servers.agent-arena]",
+    "command = " + tomlQuote(local.command),
+    "args = [" + local.args.map(tomlQuote).join(", ") + "]",
+    "env = { " + Object.entries(local.env).map(([key, value]) => key + " = " + tomlQuote(value)).join(", ") + " }",
+    "",
+  ].join("\n");
   return [
     "[mcp_servers.agent-arena]",
     "url = " + tomlQuote(url),

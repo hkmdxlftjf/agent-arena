@@ -156,7 +156,10 @@ const code = entry(".config/Code/User/mcp.json", "servers");
 if (code.type !== "http" || code.url !== mcp) throw new Error("vscode");
 const oc = entry(".config/opencode/opencode.json", "mcp");
 if (oc.type !== "remote" || oc.oauth !== false || oc.headers.Authorization !== auth || !oc.enabled) throw new Error("opencode");
-if (read(".config/opencode/opencode.json").mcp.other.command[0] !== "echo") throw new Error("opencode other");
+const ocDoc = read(".config/opencode/opencode.json");
+if (ocDoc.mcp.other.command[0] !== "echo") throw new Error("opencode other");
+if ((ocDoc.permission.external_directory || {})["~/.arena/**"] !== "allow") throw new Error("opencode external_directory permission");
+if ((ocDoc.permission.bash || {})["node *sign.mjs*"] !== "allow") throw new Error("opencode bash permission");
 const gem = entry(".gemini/settings.json", "mcpServers");
 if (gem.httpUrl !== mcp || gem.url) throw new Error("gemini");
 const wind = entry(".codeium/windsurf/mcp_config.json", "mcpServers");
@@ -198,6 +201,46 @@ if [ "$codex_backs" != "1" ] || [ "$goose_backs" != "1" ] || [ "$zed_backs" != "
   exit 1
 fi
 
+# opencode.jsonc: comments/trailing commas tolerated, .json never created,
+# ~/.arena 与 sign.mjs 预授权，其他 server 与用户 permission 保留。
+jsonc_home=$(mktemp -d)
+mkdir -p "$jsonc_home/.config/opencode"
+printf '%s\n' '// 用户注释' '{' '  "mcp": {' '    "other": {' '      "type": "local",' '      "command": ["echo"],' '    },' '  },' '  "permission": {' '    "webextension": { "*": "ask" },' '  },' '}' > "$jsonc_home/.config/opencode/opencode.jsonc"
+
+applied_jsonc=$(sh scripts/connect.sh --skip-network --clients opencode --token "$TOKEN" --home "$jsonc_home" --base-url "https://agent.idou.bid")
+if printf '%s\n' "$applied_jsonc" | grep -q "$TOKEN"; then
+  printf '%s\n' "jsonc apply printed the token" >&2
+  exit 1
+fi
+printf '%s\n' "$applied_jsonc" | grep -q 'updated'
+node - "$jsonc_home" "$TOKEN" <<'CHECKJSONC'
+const fs = require("node:fs");
+const path = require("node:path");
+const home = process.argv[2];
+const token = process.argv[3];
+const auth = "Bearer " + token;
+const mcp = "https://agent.idou.bid/mcp";
+const file = path.join(home, ".config/opencode/opencode.jsonc");
+const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+if (fs.existsSync(file.replace(/\.jsonc$/, ".json"))) throw new Error("opencode.json was created");
+const oc = doc.mcp["agent-arena"];
+if (!oc || oc.type !== "remote" || oc.oauth !== false || oc.headers.Authorization !== auth || !oc.enabled) throw new Error("jsonc opencode entry");
+const other = doc.mcp.other;
+if (!other || other.type !== "local" || other.command[0] !== "echo") throw new Error("jsonc other lost");
+if ((doc.permission.external_directory || {})["~/.arena/**"] !== "allow") throw new Error("jsonc external_directory permission");
+if ((doc.permission.bash || {})["node *sign.mjs*"] !== "allow") throw new Error("jsonc bash permission");
+if ((doc.permission.webextension || {})["*"] !== "ask") throw new Error("jsonc user permission lost");
+CHECKJSONC
+find "$jsonc_home/.config/opencode" -name 'opencode.jsonc.bak.*' | grep -q .
+
+again_jsonc=$(sh scripts/connect.sh --skip-network --clients opencode --token "$TOKEN" --home "$jsonc_home" --base-url "https://agent.idou.bid")
+printf '%s\n' "$again_jsonc" | grep -q 'unchanged'
+jsonc_backs=$(find "$jsonc_home/.config/opencode" -name 'opencode.jsonc.bak.*' | wc -l | tr -d ' ')
+if [ "$jsonc_backs" != "1" ]; then
+  printf '%s\n' "expected one jsonc backup, found $jsonc_backs" >&2
+  exit 1
+fi
+
 # --clients writes only the named client.
 only=$(mktemp -d)
 mkdir -p "$only/.claude"
@@ -221,14 +264,18 @@ mkdir -p "$menu_home/.claude" "$menu_home/.cursor"
 python3 - "$menu_home" "$TOKEN" <<'PY'
 import os, pty, select, sys, time
 home, token = sys.argv[1], sys.argv[2]
+# 机器上可能全局装着 opencode；从子进程 PATH 剥掉含 opencode 二进制的目录，
+# 让检测结果只来自 HOME_DIR，测试才可复现。
+clean = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p and not os.path.exists(os.path.join(p, "opencode"))]
+env = dict(os.environ, PATH=os.pathsep.join(clean))
 pid, fd = pty.fork()
 if pid == 0:
-    os.execvp("sh", ["sh", "scripts/connect.sh", "--skip-network", "--token", token, "--home", home, "--base-url", "https://agent.idou.bid"])
+    os.execvpe("sh", ["sh", "scripts/connect.sh", "--skip-network", "--token", token, "--home", home, "--base-url", "https://agent.idou.bid"], env)
 data = b""
 sent = False
 deadline = time.time() + 15
 while time.time() < deadline:
-    readable, _, _ = select.select([fd], [], [], 0.4)
+    readable, _, _ = select.select([fd], [], [], max(0, deadline - time.time()))
     if fd in readable:
         try:
             chunk = os.read(fd, 4096)
@@ -241,9 +288,8 @@ while time.time() < deadline:
             os.write(fd, b"\n")
             sent = True
     else:
-        wpid, _status = os.waitpid(pid, os.WNOHANG)
-        if wpid:
-            break
+        os.kill(pid, 15)
+        raise SystemExit("menu timed out")
 else:
     os.kill(pid, 15)
     raise SystemExit("menu timed out")
@@ -272,14 +318,16 @@ mkdir -p "$skip_home/.claude"
 python3 - "$skip_home" "$TOKEN" <<'PY'
 import os, pty, select, sys, time
 home, token = sys.argv[1], sys.argv[2]
+clean = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p and not os.path.exists(os.path.join(p, "opencode"))]
+env = dict(os.environ, PATH=os.pathsep.join(clean))
 pid, fd = pty.fork()
 if pid == 0:
-    os.execvp("sh", ["sh", "scripts/connect.sh", "--skip-network", "--token", token, "--home", home, "--base-url", "https://agent.idou.bid"])
+    os.execvpe("sh", ["sh", "scripts/connect.sh", "--skip-network", "--token", token, "--home", home, "--base-url", "https://agent.idou.bid"], env)
 data = b""
 sent = False
 deadline = time.time() + 15
 while time.time() < deadline:
-    readable, _, _ = select.select([fd], [], [], 0.4)
+    readable, _, _ = select.select([fd], [], [], max(0, deadline - time.time()))
     if fd in readable:
         try:
             chunk = os.read(fd, 4096)
@@ -292,9 +340,8 @@ while time.time() < deadline:
             os.write(fd, b"n\n")
             sent = True
     else:
-        wpid, _status = os.waitpid(pid, os.WNOHANG)
-        if wpid:
-            break
+        os.kill(pid, 15)
+        raise SystemExit("skip menu timed out")
 else:
     os.kill(pid, 15)
     raise SystemExit("skip menu timed out")
@@ -317,7 +364,7 @@ mkdir -p "$skill_home/.claude/skills/arena"
 printf '%s\n' "old copy" > "$skill_home/.claude/skills/arena/SKILL.md"
 ARENA_SKILL_SRC="$skill_src/arena" sh scripts/connect.sh --skip-network --skill-only --clients "$clients" --token "$TOKEN" --home "$skill_home" --base-url "https://agent.idou.bid" >/tmp/arena-skill.out
 central="$skill_home/.arena/skill/arena"
-if [ ! -f "$central/SKILL.md" ] || [ ! -f "$central/scripts/sign.mjs" ]; then
+if [ ! -f "$central/SKILL.md" ] || [ ! -f "$central/scripts/sign.mjs" ] || [ ! -f "$central/scripts/sign-lock.mjs" ]; then
   printf '%s\n' "central skill missing" >&2
   exit 1
 fi
@@ -358,7 +405,7 @@ python3 - "$skill_home/.arena/skill/arena-skill.zip" <<'PY'
 import sys, zipfile
 z = zipfile.ZipFile(sys.argv[1])
 names = z.namelist()
-if "arena/SKILL.md" not in names or "arena/scripts/sign.mjs" not in names:
+if not {"arena/SKILL.md", "arena/scripts/sign.mjs", "arena/scripts/sign-lock.mjs"}.issubset(names):
     raise SystemExit("desktop zip missing skill files: " + ",".join(names))
 if any(not n.startswith("arena/") for n in names):
     raise SystemExit("desktop zip root is not arena/")
@@ -405,5 +452,8 @@ if '"dependencies"' in pkg:
     raise SystemExit("agent-arena package must stay dependency-free")
 PY
 
-rm -rf "$HOME_DIR" "$all_home" "$only" "$menu_home" "$skip_home" "$skill_home" "$skill_src" "$mcp_only"
+node --test scripts/test-connect-key.mjs
+node "$central/scripts/sign.mjs" version >/dev/null
+
+rm -rf "$HOME_DIR" "$all_home" "$only" "$menu_home" "$skip_home" "$skill_home" "$skill_src" "$mcp_only" "$jsonc_home"
 printf '%s\n' "connect.sh ok"

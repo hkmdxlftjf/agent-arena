@@ -8,6 +8,10 @@ import zlib from "node:zlib";
 
 const BASE_DEFAULT = "https://agent.idou.bid";
 const WRITER = fileURLToPath(new URL("./write.cjs", import.meta.url));
+const LOCAL_CLIENTS = new Set([
+  "claude-code", "claude-desktop", "cursor", "vscode", "opencode", "codex",
+  "gemini", "windsurf", "cline", "roo", "qwen", "kiro", "trae",
+]);
 const CLIENT_IDS = [
   "claude-code",
   "claude-desktop",
@@ -63,7 +67,7 @@ function fail(message, code) {
 
 function usage() {
   return fail(
-    "用法: npx -y github:hkmdxlftjf/agent-arena connect --token <AGENT_TOKEN> [--yes] [--clients claude-code,cursor] [--skill-only] [--mcp-only] [--dry-run]",
+    "用法: agent-arena serve | connect [--local] [--token <AGENT_TOKEN>] [--yes] [--clients claude-code,cursor] [--skill-only] [--mcp-only] [--dry-run]",
     2,
   );
 }
@@ -120,8 +124,11 @@ function clientConfigPath(home, id) {
       return path.join(home, ".cursor", "mcp.json");
     case "vscode":
       return path.join(vscodeUserDir(home), "mcp.json");
-    case "opencode":
-      return path.join(home, ".config", "opencode", "opencode.json");
+    case "opencode": {
+      const dir = path.join(home, ".config", "opencode");
+      const jsonc = path.join(dir, "opencode.jsonc");
+      return fs.existsSync(jsonc) ? jsonc : path.join(dir, "opencode.json");
+    }
     case "codex":
       return path.join(home, ".codex", "config.toml");
     case "gemini":
@@ -326,6 +333,25 @@ function redact(text, token) {
 function writeClient(opts, id) {
   const file = clientConfigPath(opts.home, id);
   const env = { ...process.env, ARENA_CONNECT_TOKEN: opts.dry ? "" : opts.token };
+  if (opts.local) {
+    env.ARENA_CONNECT_LOCAL = JSON.stringify({
+      command: process.execPath,
+      args: [path.join(opts.arenaHome, "runtime", "bin.mjs"), "serve"],
+      env: {
+        ARENA_TOKEN: opts.dry ? "" : opts.token,
+        ARENA_HOME: opts.arenaHome,
+        ARENA_BASE_URL: opts.base,
+        ARENA_SIGN_SCRIPT: path.join(centralSkill(opts.home), "scripts", "sign.mjs"),
+        ...(process.env.ARENA_ALLOWED_ORIGINS === undefined ? {} : { ARENA_ALLOWED_ORIGINS: process.env.ARENA_ALLOWED_ORIGINS }),
+      },
+    });
+    if (id === "opencode") {
+      const version = spawnSync("opencode", ["--version"], { encoding: "utf8" });
+      if (version.status === 0) env.ARENA_CONNECT_OPENCODE_VERSION = version.stdout.trim();
+    }
+  } else {
+    delete env.ARENA_CONNECT_LOCAL;
+  }
   const result = spawnSync(process.execPath, [WRITER, id, file, `${opts.base}/mcp`, opts.dry ? "1" : "0"], {
     encoding: "utf8",
     env,
@@ -336,7 +362,7 @@ function writeClient(opts, id) {
   }
   const line = (result.stdout || "").trim().split("\n").pop();
   say(`client: ${id} ${file} ${line}`);
-  if (id === "claude-code" && opts.home === opts.realHome && commandExists("claude")) {
+  if (!opts.local && id === "claude-code" && opts.home === opts.realHome && commandExists("claude")) {
     if (opts.dry) {
       say("client: claude-code cli would-run");
     } else {
@@ -374,7 +400,7 @@ function planSkills(home, selected) {
 
 function placeCentral(src, home) {
   const dest = centralSkill(home);
-  if (!fs.existsSync(path.join(src, "SKILL.md")) || !fs.existsSync(path.join(src, "scripts", "sign.mjs"))) {
+  if (!["SKILL.md", "scripts/sign.mjs", "scripts/sign-lock.mjs"].every((name) => fs.existsSync(path.join(src, name)))) {
     return fail("技能包内容不完整。", 1);
   }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -409,7 +435,7 @@ name: arena
 description: 用户提到 agent-arena、对局、落子或房间时，先读技能文件再行动。
 ---
 
-玩 Agent Arena 时先读下面两个文件，按技能里的步骤签名。不要改 sign.mjs。
+玩 Agent Arena 时先读下面两个文件，按技能区分远程信封或本地网关流程。不要改 sign.mjs。
 
 - 技能：${skill}
 - 签名：${sign}
@@ -422,7 +448,7 @@ description: 用户提到 agent-arena、对局、落子或房间时读取技能�
 alwaysApply: false
 ---
 
-玩 Agent Arena 时先读下面两个文件，按技能里的步骤签名。不要改 sign.mjs。
+玩 Agent Arena 时先读下面两个文件，按技能区分远程信封或本地网关流程。不要改 sign.mjs。
 
 - 技能：${skill}
 - 签名：${sign}
@@ -430,7 +456,7 @@ alwaysApply: false
   }
   return `# Agent Arena
 
-用户提到 agent-arena、对局、落子或房间时，先读技能文件，再按里面的步骤签名。不要改 sign.mjs。
+用户提到 agent-arena、对局、落子或房间时，先读技能文件，按其中的远程信封或本地网关流程行动。不要改 sign.mjs。
 
 - 技能：${skill}
 - 签名：${sign}
@@ -659,7 +685,8 @@ function parseTool(result) {
 async function registerKey(opts) {
   const sign = path.join(centralSkill(opts.home), "scripts", "sign.mjs");
   if (!fs.existsSync(sign)) return fail("没有找到 sign.mjs", 1);
-  const arenaHome = path.join(opts.home, ".arena");
+  const arenaHome = path.resolve(process.env.ARENA_HOME || path.join(opts.home, ".arena"));
+  say(`signer-home: ${redact(arenaHome, opts.token)}`);
   fs.mkdirSync(arenaHome, { recursive: true });
   try {
     fs.chmodSync(arenaHome, 0o700);
@@ -667,7 +694,7 @@ async function registerKey(opts) {
     /* Windows may refuse the mode bit. */
   }
   const env = { ...process.env, ARENA_HOME: arenaHome };
-  const pub = spawnSync(process.execPath, [sign, "pubkey"], { encoding: "utf8", env });
+  let pub = spawnSync(process.execPath, [sign, "pubkey"], { encoding: "utf8", env });
   if (pub.status !== 0) {
     say("正在生成本机签名密钥");
     const gen = spawnSync(process.execPath, [sign, "keygen"], { encoding: "utf8", env });
@@ -680,11 +707,14 @@ async function registerKey(opts) {
     } catch {
       return fail("本地密钥生成失败", 1);
     }
+    pub = gen;
     say(`已生成公钥 ${kid}`);
   } else {
     say("本机已有签名密钥");
   }
   try {
+    const localKey = JSON.parse(pub.stdout);
+    if (!localKey.ok || !localKey.kid || !localKey.public_key) return fail("本地公钥无法解析", 1);
     const init = await rpc(opts, null, "initialize", {
       protocolVersion: "2025-03-26",
       capabilities: {},
@@ -706,6 +736,9 @@ async function registerKey(opts) {
       }
       parseTool((await rpc(opts, init.session, "tools/call", { name: "register_agent_key", arguments: { envelope } })).result);
       const who = parseTool((await rpc(opts, init.session, "tools/call", { name: "whoami", arguments: {} })).result);
+      const confirmed = (who.keys || []).some((key) =>
+        key.kid === localKey.kid && key.public_key === localKey.public_key && key.status === "active");
+      if (!confirmed) return fail("公钥校验失败：当前智能体没有本机对应的有效公钥，请确认令牌与 ARENA_HOME", 1);
       const kids = (who.keys || []).map((k) => k.kid).filter(Boolean).join(" ");
       say(`agent: ${who.name || ""} @${who.owner_handle || ""}`);
       say(`keys: ${kids}`);
@@ -730,6 +763,7 @@ function parseArgs(argv) {
     clientsArg: "",
     skillOnly: false,
     mcpOnly: false,
+    local: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -745,6 +779,7 @@ function parseArgs(argv) {
     } else if (arg === "--yes" || arg === "-y") opts.yes = true;
     else if (arg === "--dry-run") opts.dry = true;
     else if (arg === "--skip-network") opts.skipNetwork = true;
+    else if (arg === "--local") opts.local = true;
     else if (arg === "--base-url") {
       const value = need();
       if (value === null) return usage();
@@ -765,6 +800,13 @@ function parseArgs(argv) {
   return opts;
 }
 
+function openCodeHint(selected, dry) {
+  if (!selected.includes("opencode")) return;
+  say(dry
+    ? "opencode: 将预授权 ~/.arena 目录与 sign.mjs 命令，避免 external_directory 授权弹窗"
+    : "opencode: 已预授权 ~/.arena 目录与 sign.mjs 命令；若仍弹授权，选 Always allow 即可");
+}
+
 export async function main(argv) {
   const cmd = argv[0];
   if (!cmd || cmd === "-h" || cmd === "--help") return usage();
@@ -781,6 +823,13 @@ export async function main(argv) {
   if (!opts.dry && !opts.token) return fail("缺少 --token。令牌只应放进客户端配置，不要贴到聊天记录里。", 1);
   const selected = chooseClients(opts.home, opts);
   if (typeof selected === "number") return selected;
+  opts.home = path.resolve(opts.home);
+  opts.arenaHome = path.resolve(process.env.ARENA_HOME || path.join(opts.home, ".arena"));
+  if (opts.local) {
+    if (opts.skillOnly) return fail("--local 不能与 --skill-only 一起使用。", 2);
+    const unsupported = selected.filter((id) => !LOCAL_CLIENTS.has(id));
+    if (unsupported.length) return fail(`不支持本地 stdio 客户端: ${unsupported.join(", ")}`, 2);
+  }
   if (opts.dry) {
     if (!opts.mcpOnly) {
       say(`将下载 ${opts.base}/skill/arena-skill-v1.0.0.zip 并核对 sha256`);
@@ -790,6 +839,7 @@ export async function main(argv) {
     if (!opts.skillOnly) {
       const code = configureClients(opts, selected);
       if (code !== 0) return code;
+      if (!opts.local) openCodeHint(selected, true);
       say("将调用 whoami 核对公钥");
     }
     say("next: 在智能体里用自然语言说：用 agent-arena 列出可以玩的游戏");
@@ -804,6 +854,25 @@ export async function main(argv) {
   } else if (opts.skipNetwork) {
     say("skip-network: 1");
   }
+  if (opts.local) {
+    const signDir = path.join(centralSkill(opts.home), "scripts");
+    if (!["sign.mjs", "sign-lock.mjs"].every((name) => fs.existsSync(path.join(signDir, name)))) {
+      return fail("--local 需要完整的已安装技能（sign.mjs 与 sign-lock.mjs）。", 1);
+    }
+    // Copy out of npx's disposable cache before publishing any client command.
+    const runtime = path.join(opts.arenaHome, "runtime");
+    const source = fileURLToPath(new URL("../", import.meta.url));
+    fs.mkdirSync(path.join(runtime, "lib"), { recursive: true, mode: 0o700 });
+    fs.chmodSync(opts.arenaHome, 0o700);
+    fs.chmodSync(runtime, 0o700);
+    for (const name of ["bin.mjs", "lib/connect.mjs", "lib/write.cjs",
+      "lib/gateway.mjs", "lib/gateway-remote.mjs", "lib/gateway-store.mjs"]) {
+      const dest = path.join(runtime, name);
+      if (path.resolve(source, name) !== dest) fs.copyFileSync(path.join(source, name), dest);
+      fs.chmodSync(dest, 0o600);
+    }
+    say(`runtime: ${redact(runtime, opts.token)}`);
+  }
   const sign = path.join(centralSkill(opts.home), "scripts", "sign.mjs");
   if (!opts.skipNetwork && fs.existsSync(sign)) {
     const code = await registerKey(opts);
@@ -814,6 +883,7 @@ export async function main(argv) {
   if (!opts.skillOnly) {
     const code = configureClients(opts, selected);
     if (code !== 0) return code;
+    if (!opts.local) openCodeHint(selected, false);
   }
   say("next: 在智能体里用自然语言说：用 agent-arena 列出可以玩的游戏");
   return 0;

@@ -1,7 +1,7 @@
 {
   "name": "agent-arena",
   "version": "1.0.0",
-  "description": "Install the Agent Arena skill, write MCP client config, and register a signing key.",
+  "description": "Install Agent Arena clients and run the local stdio signing gateway.",
   "type": "module",
   "bin": {
     "agent-arena": "./bin.mjs"

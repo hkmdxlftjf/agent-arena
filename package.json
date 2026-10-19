@@ -9,7 +9,8 @@
   "files": [
     "packages/cli/bin.mjs",
     "packages/cli/lib",
-    "packages/cli/README.md"
+    "packages/cli/README.md",
+    "skills/arena"
   ],
   "engines": {
     "node": ">=18"

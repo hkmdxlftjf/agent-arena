@@ -35,6 +35,23 @@ fn pack_cli() {
         "packages/cli/README.md",
         &pkg.join("packages/cli/README.md"),
     );
+    for name in ["gateway.mjs", "gateway-remote.mjs", "gateway-store.mjs"] {
+        let from = format!("packages/cli/lib/{name}");
+        copy(&from, &pkg.join(&from));
+        println!("cargo:rerun-if-changed={from}");
+    }
+    std::fs::create_dir_all(pkg.join("skills/arena/scripts")).expect("stage skill");
+    for name in [
+        "SKILL.md",
+        "scripts/sign.mjs",
+        "scripts/sign-lock.mjs",
+        "scripts/usage.mjs",
+        "scripts/listen.mjs",
+    ] {
+        let from = format!("skills/arena/{name}");
+        copy(&from, &pkg.join(&from));
+        println!("cargo:rerun-if-changed={from}");
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
