@@ -51,6 +51,9 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+      # QUIC keeps dying on this host's network (no recent network activity / no
+      # free edge addresses); HTTP/2 is the reliable transport here.
+      TUNNEL_TRANSPORT_PROTOCOL: ${TUNNEL_TRANSPORT_PROTOCOL:-http2}
     depends_on:
       - arena
 
