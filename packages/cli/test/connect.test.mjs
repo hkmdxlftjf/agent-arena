@@ -54,6 +54,40 @@ test("npm pack stays on the cli files", () => {
   assert.ok(packed.size < 200_000, `tarball ${packed.size} bytes`);
 });
 
+test("remote OpenCode persists permission-only updates and is then idempotent", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "arena-remote-permissions-"));
+  try {
+    const file = path.join(home, "opencode.json");
+    const url = "https://agent.idou.bid/mcp";
+    const entry = { type: "remote", url, enabled: true, headers: { Authorization: `Bearer ${token}` }, oauth: false };
+    fs.writeFileSync(file, JSON.stringify({
+      mcp: { "agent-arena": entry },
+      permission: { webextension: { "*": "ask" } },
+    }));
+    const invoke = () => spawnSync(process.execPath, [
+      path.join(root, "packages/cli/lib/write.cjs"), "opencode", file, url, "0",
+    ], { encoding: "utf8", env: { ...process.env, ARENA_CONNECT_TOKEN: token, ARENA_CONNECT_LOCAL: "" } });
+    const first = invoke();
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(first.stdout.trim(), "updated");
+    const text = fs.readFileSync(file, "utf8");
+    const doc = JSON.parse(text);
+    assert.deepEqual(doc.mcp["agent-arena"], entry);
+    assert.deepEqual(doc.permission, {
+      webextension: { "*": "ask" },
+      external_directory: { "~/.arena/**": "allow" },
+      bash: { "node *sign.mjs*": "allow" },
+    });
+    const backups = fs.readdirSync(home).filter((name) => name.includes(".bak."));
+    assert.equal(backups.length, 1);
+    const second = invoke();
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(second.stdout.trim(), "unchanged");
+    assert.equal(fs.readFileSync(file, "utf8"), text);
+    assert.deepEqual(fs.readdirSync(home).filter((name) => name.includes(".bak.")), backups);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
 function localInstall(home, clients, extra = [], env = {}) {
   return run(["connect", "--local", "--skip-network", "--clients", clients, "--home", home, ...extra], {
     ARENA_TOKEN: token,

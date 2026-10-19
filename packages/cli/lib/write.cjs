@@ -245,8 +245,8 @@ function writeJson() {
   let permOk = true;
   if (client === "opencode" && !local) {
     if (typeof doc.permission !== "string") {
-      doc.permission = mergeOpenCodePermission(doc.permission);
       permOk = openCodePermissionOk(doc.permission);
+      doc.permission = mergeOpenCodePermission(doc.permission);
     }
   }
   if (!dry && JSON.stringify(prev) === JSON.stringify(next) && permOk) {
