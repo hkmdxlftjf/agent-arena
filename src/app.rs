@@ -1,5 +1,6 @@
 //! Accounts, rooms, and the process-wide handle the HTTP and MCP layers share.
 
+use crate::ai::AiBot;
 use crate::canon::canon;
 use crate::config::Config;
 use crate::crypto::{
@@ -142,6 +143,7 @@ struct Inner {
     games: HashMap<String, GameInfo>,
     uploads: RwLock<HashMap<String, UploadInfo>>,
     hub: Hub,
+    ai: Option<Arc<AiBot>>,
 }
 
 #[derive(Clone)]
@@ -170,6 +172,10 @@ impl App {
         self.inner.hub.slot(id)
     }
 
+    pub fn ai(&self) -> Option<&Arc<AiBot>> {
+        self.inner.ai.as_ref()
+    }
+
     pub async fn boot(pool: PgPool, server: ServerKey, cfg: Config) -> anyhow::Result<Self> {
         let key_path = cfg.data_dir.join("keys").join("server.ed25519");
         sqlx::query(
@@ -186,6 +192,7 @@ impl App {
         let games = bootstrap_games(&pool).await?;
         crate::cosmetics::ensure_catalog(&pool).await?;
         let uploads = load_uploads(&pool).await?;
+        let ai = AiBot::bootstrap(&cfg, &pool).await?;
         let app = Self {
             inner: Arc::new(Inner {
                 pool,
@@ -194,6 +201,7 @@ impl App {
                 games,
                 uploads: RwLock::new(uploads),
                 hub: Hub::new(),
+                ai: ai.map(Arc::new),
             }),
         };
         app.recover().await;
@@ -214,6 +222,9 @@ impl App {
                 }
             }
         });
+        if let Some(bot) = app.inner.ai.clone() {
+            bot.spawn(app.clone());
+        }
         Ok(app)
     }
 
@@ -1269,6 +1280,41 @@ impl App {
             .resolve_key(agent, body.get("kid").and_then(|v| v.as_str()))
             .await?;
         self.ensure_free(agent).await?;
+        let vs_ai = body.get("opponent").and_then(Value::as_str) == Some("ai");
+        let ai = if vs_ai {
+            let bot = self
+                .ai()
+                .cloned()
+                .ok_or_else(|| CallError::new(400, "ai_disabled", "服务器还没有配置 AI 对手"))?;
+            if !bot.games.iter().any(|g| g == game_id) {
+                return Err(CallError::new(
+                    400,
+                    "ai_unsupported",
+                    "这款游戏暂不支持 AI 对手",
+                ));
+            }
+            if manifest.max_players != 2 {
+                return Err(CallError::new(
+                    400,
+                    "ai_unsupported",
+                    "AI 对手目前只支持两人对局",
+                ));
+            }
+            let busy: Option<Uuid> = sqlx::query_scalar(
+                "SELECT m.id FROM match_players mp JOIN matches m ON m.id = mp.match_id
+                 WHERE mp.agent_id = $1 AND m.status IN ('waiting','running') LIMIT 1",
+            )
+            .bind(bot.agent_id)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?;
+            if busy.is_some() {
+                return Err(CallError::new(409, "ai_busy", "AI 正在另一局里"));
+            }
+            Some(bot)
+        } else {
+            None
+        };
         let match_id = Uuid::new_v4();
         let code = self.unique_code().await?;
         let mut tx = self.pool().begin().await.map_err(db_err)?;
@@ -1311,15 +1357,46 @@ impl App {
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+        if let Some(bot) = &ai {
+            sqlx::query(
+                "INSERT INTO match_players (match_id, seat, agent_id, owner_id, kid) VALUES ($1, 1, $2, $3, $4)",
+            )
+            .bind(match_id)
+            .bind(bot.agent_id)
+            .bind(bot.owner_id)
+            .bind(&bot.kid)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+            sqlx::query("UPDATE matches SET status = 'running', started_at = now() WHERE id = $1")
+                .bind(match_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
         tx.commit().await.map_err(db_err)?;
         self.inner.hub.slot(match_id);
+        if ai.is_some() {
+            spawn_room(
+                self.pool().clone(),
+                self.server().clone(),
+                &self.inner.hub,
+                match_id,
+                self.signing_origin(),
+                self.match_limit_ms(),
+                self.room_wait_ms(),
+            )
+            .await
+            .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
+            self.slot(match_id).notify.notify_waiters();
+        }
         Ok(json!({
             "match_id": match_id,
             "room_code": code,
             "seat": 0,
             "game_id": game_id,
             "variant": variant,
-            "status": "waiting",
+            "status": if ai.is_some() { "running" } else { "waiting" },
             "time_limit_sec": time_limit_ms / 1000,
         }))
     }

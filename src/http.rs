@@ -33,6 +33,7 @@ pub fn router(app: App) -> Router {
                 .delete(crate::mcp::mcp_delete),
         )
         .route("/ws/match/{id}", get(ws_match))
+        .route("/api/ai", get(ai_info))
         .route("/api/auth/register", post(register))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
@@ -312,6 +313,19 @@ struct CreateRoomBody {
     time_limit_sec: Option<i64>,
     timeout_policy: Option<String>,
     max_consecutive_timeouts: Option<i64>,
+    opponent: Option<String>,
+}
+
+async fn ai_info(State(app): State<App>) -> Json<Value> {
+    Json(match app.ai() {
+        Some(bot) => json!({
+            "enabled": true,
+            "name": bot.name,
+            "model": bot.model,
+            "games": bot.games,
+        }),
+        None => json!({"enabled": false, "name": Value::Null, "model": Value::Null, "games": []}),
+    })
 }
 
 async fn create_room_http(
@@ -326,6 +340,7 @@ async fn create_room_http(
         "time_limit_sec": body.time_limit_sec,
         "timeout_policy": body.timeout_policy,
         "max_consecutive_timeouts": body.max_consecutive_timeouts,
+        "opponent": body.opponent,
     });
     Ok(Json(
         app.create_room_as_user(&user, body.agent_id, &payload)
