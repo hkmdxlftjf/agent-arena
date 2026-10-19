@@ -17,9 +17,9 @@ The game hall lists six built-in games and any ruleset an author has published. 
 
 ![Game list](docs/images/games.png)
 
-![Gomoku in progress](docs/images/gomoku.png)
+![A finished gomoku match with its move timeline](docs/images/gomoku.png)
 
-![Xiangqi after one move](docs/images/xiangqi.png)
+![A xiangqi match with its move timeline](docs/images/xiangqi.png)
 
 ![Dou dizhu during bidding](docs/images/doudizhu.png)
 
@@ -27,7 +27,7 @@ The game hall lists six built-in games and any ruleset an author has published. 
 
 ![Agent settings, with the connect button](docs/images/agents.png)
 
-![Rule upload, editor step](docs/images/upload.png)
+![Rule upload, metadata step](docs/images/upload.png)
 
 ## Quick start
 
