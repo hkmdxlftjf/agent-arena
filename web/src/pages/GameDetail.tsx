@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { api, ApiError } from "@/lib/api"
 import { gameTone, players, TRAIT } from "@/lib/games"
 import type { AgentRow, Manifest, User } from "@/lib/types"
-import { ArrowLeft, BookOpen, Clock, DoorOpen, Gamepad2, Timer, Trophy, Users } from "lucide-react"
+import { ArrowLeft, BookOpen, Bot, Clock, DoorOpen, Gamepad2, Timer, Trophy, Users } from "lucide-react"
 import { lazy, Suspense, useEffect, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
 
@@ -24,10 +24,11 @@ export function GameDetail() {
   const [agentId, setAgentId] = useState("")
   const [variant, setVariant] = useState("")
   const [limitSec, setLimitSec] = useState(180)
-  const [created, setCreated] = useState<{ match_id: string; room_code: string } | null>(null)
+  const [created, setCreated] = useState<{ match_id: string; room_code: string; vsAi?: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [note, setNote] = useState("")
+  const [ai, setAi] = useState<{ enabled: boolean; name: string; model: string; games: string[] } | null>(null)
   useEffect(() => {
     api<Manifest>(`/api/games/${id}`)
       .then((body) => {
@@ -45,9 +46,12 @@ export function GameDetail() {
         setUser(null)
         setAgents([])
       })
+    api<{ enabled: boolean; name: string; model: string; games: string[] }>("/api/ai")
+      .then(setAi)
+      .catch(() => setAi(null))
   }, [id])
 
-  async function openRoom() {
+  async function openRoom(vsAi = false) {
     if (!game || !agentId) return
     setBusy(true)
     setNote("")
@@ -59,9 +63,10 @@ export function GameDetail() {
           game: game.id,
           variant: variant || game.variants[0]?.id,
           time_limit_sec: limitSec,
+          ...(vsAi ? { opponent: "ai" } : {}),
         }),
       })
-      setCreated(body)
+      setCreated({ ...body, vsAi })
     } catch (err) {
       setNote(err instanceof ApiError ? err.message : "开房失败")
     } finally {
@@ -309,11 +314,26 @@ export function GameDetail() {
                     <Users aria-hidden />
                     {busy ? "开房中…" : "开房"}
                   </Button>
+                  {ai?.enabled && ai.games.includes(game.id) && game.maxPlayers === 2 && (
+                    <div className="grid gap-2">
+                      <Button type="button" variant="secondary" size="lg" disabled={busy || !agentId} onClick={() => void openRoom(true)}>
+                        <Bot aria-hidden />
+                        {busy ? "开房中…" : `和 ${ai.name} 对战`}
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        服务器内置对手（{ai.model}）自动入座，房间会立刻开始；把房间码交给你的智能体就能开下。
+                      </p>
+                    </div>
+                  )}
                 </form>
               )}
               {created && (
                 <div className="pop-in mt-4 grid gap-3 rounded-xl border border-primary/40 bg-accent/40 p-4 text-sm">
-                  <p className="text-muted-foreground">房间已开好，把房间码发给对手：</p>
+                  <p className="text-muted-foreground">
+                    {created.vsAi
+                      ? "AI 已入座，对局已经开始；把房间码交给你的智能体："
+                      : "房间已开好，把房间码发给对手："}
+                  </p>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-data text-2xl tracking-[0.2em] text-foreground">{created.room_code}</span>
                     <CopyButton text={created.room_code} />

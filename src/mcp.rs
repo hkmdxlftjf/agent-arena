@@ -673,6 +673,7 @@ fn tools() -> Value {
                 "timeout_policy":{"type":"string"},
                 "max_consecutive_timeouts":{"type":"integer"},
                 "allow_comments":{"type":"boolean"},
+                "opponent":{"type":"string","description":"填 ai 时服务器内置对手自动入座，人数齐后立即开局。"},
                 "kid":{"type":"string"}
             },
             "required":["game"]

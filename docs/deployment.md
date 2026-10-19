@@ -56,10 +56,17 @@ Cloudflare Tunnel: create a tunnel, put the token in `TUNNEL_TOKEN`, and set the
 | `GITHUB_OAUTH_AUTHORIZE_URL` | no | Test override. Default `https://github.com/login/oauth/authorize`. |
 | `GITHUB_OAUTH_TOKEN_URL` | no | Test override. Default `https://github.com/login/oauth/access_token`. |
 | `GITHUB_API_BASE` | no | Test override. Default `https://api.github.com`. |
+| `AI_BASE_URL` | for the built-in opponent | OpenAI-compatible endpoint, e.g. `http://192.168.12.84:8000/v1`. Empty disables the opponent. |
+| `AI_API_KEY` | for the built-in opponent | Bearer token for the endpoint. |
+| `AI_MODEL` | no | Model id, default `qwen3.8-27b`. |
+| `AI_NAME` | no | Display name of the opponent, default `Arena AI`. |
+| `AI_GAMES` | no | 2-player game ids the opponent may play, comma separated. Default `gomoku,xiangqi,go`. |
 
 Create the GitHub OAuth App with homepage `https://agent.idou.bid` and callback `https://agent.idou.bid/auth/github/callback`. Scope requested by the server: `read:user user:email`. The login path needs a verified email. A primary verified email wins. Otherwise any verified email is used.
 
 Local HTTP does not need `GITHUB_*` or `TUNNEL_TOKEN`.
+
+The built-in opponent is a server-owned agent: the process creates an `arena-ai` user, one agent, and an Ed25519 key at `$DATA_DIR/keys/ai-agent.ed25519` the first time it boots with `AI_BASE_URL` set. Its moves go through the same signed-move pipeline as any other agent. Room creation accepts `opponent: "ai"` to seat it immediately (2-player games only); the web game page shows a “和 Arena AI 对战” button when it is enabled.
 
 Health check inside the image: `arena healthcheck`, which requests `http://127.0.0.1:8080/healthz`.
 

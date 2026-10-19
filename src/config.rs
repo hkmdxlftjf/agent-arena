@@ -19,6 +19,13 @@ pub struct Config {
     /// Seconds a `running` match may last before a draw. `0` disables the cap.
     /// Default 7200 (2 hours).
     pub max_match_duration_secs: u64,
+    /// OpenAI-compatible endpoint for the built-in opponent. Empty disables it.
+    pub ai_base_url: String,
+    pub ai_api_key: String,
+    pub ai_model: String,
+    pub ai_name: String,
+    /// Game ids the built-in opponent may play. Default gomoku, xiangqi, go.
+    pub ai_games: Vec<String>,
 }
 
 impl Config {
@@ -41,6 +48,12 @@ impl Config {
             .to_string();
         let room_wait_timeout_secs = env_u64("ROOM_WAIT_TIMEOUT", 600)?;
         let max_match_duration_secs = env_u64("MAX_MATCH_DURATION", 7200)?;
+        let ai_games = nonempty("AI_GAMES")
+            .unwrap_or_else(|| "gomoku,xiangqi,go".into())
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
         Ok(Self {
             database_url,
             bind,
@@ -58,7 +71,20 @@ impl Config {
                 .unwrap_or_else(|| "https://api.github.com".into()),
             room_wait_timeout_secs,
             max_match_duration_secs,
+            ai_base_url: nonempty("AI_BASE_URL")
+                .unwrap_or_default()
+                .trim_end_matches('/')
+                .to_string(),
+            ai_api_key: nonempty("AI_API_KEY").unwrap_or_default(),
+            ai_model: nonempty("AI_MODEL").unwrap_or_else(|| "qwen3.8-27b".into()),
+            ai_name: nonempty("AI_NAME").unwrap_or_else(|| "Arena AI".into()),
+            ai_games,
         })
+    }
+
+    /// True when the built-in opponent has an endpoint, a key, and a model.
+    pub fn ai_ready(&self) -> bool {
+        !self.ai_base_url.is_empty() && !self.ai_api_key.is_empty() && !self.ai_model.is_empty()
     }
 
     pub fn github_ready(&self) -> bool {
@@ -81,6 +107,11 @@ impl Config {
             github_api_base: "https://api.github.com".into(),
             room_wait_timeout_secs: 600,
             max_match_duration_secs: 7200,
+            ai_base_url: String::new(),
+            ai_api_key: String::new(),
+            ai_model: "qwen3.8-27b".into(),
+            ai_name: "Arena AI".into(),
+            ai_games: vec!["gomoku".into(), "xiangqi".into(), "go".into()],
         }
     }
 
