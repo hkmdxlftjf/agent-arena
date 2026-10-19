@@ -9,8 +9,8 @@ import { api } from "@/lib/api"
 import { authError } from "@/lib/authErrors"
 import type { AgentRow, User } from "@/lib/types"
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion"
-import { Bot, KeyRound, LogIn, Palette, Plug, Plus, Settings, ShieldOff } from "lucide-react"
-import { useEffect, useState, type CSSProperties } from "react"
+import { Bot, KeyRound, LogIn, Palette, Plug, Plus, Settings, ShieldOff, Trash2 } from "lucide-react"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { Link, useOutletContext, useSearchParams } from "react-router-dom"
 
 function shellQuote(token: string) {
@@ -26,6 +26,10 @@ export function Agents() {
   const [name, setName] = useState("")
   const [token, setToken] = useState("")
   const [connectOpen, setConnectOpen] = useState(false)
+  const [deleteAgent, setDeleteAgent] = useState<AgentRow | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState("")
+  const deleteTrigger = useRef<HTMLButtonElement | null>(null)
   const [password, setPassword] = useState("")
   const [me, setMe] = useState<User | null>(user)
   const [picked, setPicked] = useState<string | null>(null)
@@ -201,7 +205,7 @@ export function Agents() {
       <>
       <section className="panel fade-in mt-6" aria-labelledby="new-agent-title">
         <div className="panel-head">
-          <h2 id="new-agent-title" className="flex items-center gap-2">
+          <h2 id="new-agent-title" tabIndex={-1} className="flex items-center gap-2">
             <Plus className="size-4 text-primary" aria-hidden />
             新建
           </h2>
@@ -290,6 +294,19 @@ export function Agents() {
                     吊销 <span className="font-data">{item.prefix}</span>
                   </Button>
                 ))}
+              <Button
+                variant="destructive"
+                className="min-h-11"
+                aria-label={`删除智能体 ${agent.name}`}
+                onClick={(event) => {
+                  deleteTrigger.current = event.currentTarget
+                  setDeleteError("")
+                  setDeleteAgent(agent)
+                }}
+              >
+                <Trash2 aria-hidden />
+                删除
+              </Button>
             </div>
           </article>
         ))}
@@ -303,6 +320,62 @@ export function Agents() {
       </>
       )}
 
+      <Dialog
+        open={deleteAgent !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteAgent(null)
+        }}
+      >
+        <DialogContent
+          className="[&>[data-slot=dialog-close]]:min-h-11 [&>[data-slot=dialog-close]]:min-w-11"
+          showCloseButton={!deleting}
+          aria-busy={deleting}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            if (deleteTrigger.current?.isConnected) deleteTrigger.current.focus()
+            else document.getElementById("new-agent-title")?.focus()
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="pr-10">删除智能体？</DialogTitle>
+            <DialogDescription className="break-all">
+              确定删除「{deleteAgent?.name}」吗？删除后无法恢复，所有令牌将立即失效，历史对局记录仍会保留。
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && <p className="alert-error" role="alert">{deleteError}</p>}
+          {deleting && <p role="status" className="text-sm text-muted-foreground">正在删除，请稍候…</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button className="min-h-11" variant="outline" disabled={deleting} onClick={() => setDeleteAgent(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              className="min-h-11"
+              disabled={deleting}
+              onClick={async () => {
+                if (!deleteAgent || deleting) return
+                setDeleting(true)
+                setDeleteError("")
+                try {
+                  await api<{ ok: true }>(`/api/agents/${deleteAgent.id}`, { method: "DELETE" })
+                  setAgents((current) => current?.filter((agent) => agent.id !== deleteAgent.id) ?? null)
+                  setToken("")
+                  setConnectOpen(false)
+                  setNote(`已删除「${deleteAgent.name}」，令牌已失效，历史对局记录仍保留。`)
+                  setDeleteAgent(null)
+                } catch (err) {
+                  setDeleteError(err instanceof Error ? err.message : "删除失败，请重试")
+                } finally {
+                  setDeleting(false)
+                }
+              }}
+            >
+              <Trash2 aria-hidden />
+              {deleting ? "正在删除…" : "确认删除"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>

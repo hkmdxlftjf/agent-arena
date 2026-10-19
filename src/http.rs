@@ -8,7 +8,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use rust_embed::Embed;
@@ -44,6 +44,7 @@ pub fn router(app: App) -> Router {
         .route("/connect.ps1", get(connect_ps1))
         .route("/api/me", get(me))
         .route("/api/agents", get(list_agents).post(create_agent))
+        .route("/api/agents/{id}", delete(delete_agent))
         .route("/api/agents/{id}/tokens", post(issue_token))
         .route(
             "/api/agents/{id}/tokens/{tid}",
@@ -192,6 +193,16 @@ async fn issue_token(
 ) -> Result<Json<Value>, CallError> {
     let user = require_user(&app, &jar).await?;
     Ok(Json(app.issue_token(&user, id).await?))
+}
+
+async fn delete_agent(
+    State(app): State<App>,
+    jar: CookieJar,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, CallError> {
+    let user = require_user(&app, &jar).await?;
+    app.delete_agent(&user, id).await?;
+    Ok(Json(json!({"ok": true})))
 }
 
 async fn revoke_token(
@@ -539,6 +550,26 @@ fn skill_bundle(origin: &str, public_base_url: &str) -> (Vec<u8>, String) {
             zip.write_all(skill_md.as_bytes()).ok();
             zip.start_file("arena/scripts/sign.mjs", opts).ok();
             zip.write_all(sign_mjs.as_bytes()).ok();
+            zip.start_file("arena/scripts/sign-lock.mjs", opts).ok();
+            zip.write_all(include_bytes!("../skills/arena/scripts/sign-lock.mjs"))
+                .ok();
+            for (name, bytes) in [
+                (
+                    "arena/gateway/gateway.mjs",
+                    include_bytes!("../packages/cli/lib/gateway.mjs").as_slice(),
+                ),
+                (
+                    "arena/gateway/gateway-remote.mjs",
+                    include_bytes!("../packages/cli/lib/gateway-remote.mjs").as_slice(),
+                ),
+                (
+                    "arena/gateway/gateway-store.mjs",
+                    include_bytes!("../packages/cli/lib/gateway-store.mjs").as_slice(),
+                ),
+            ] {
+                zip.start_file(name, opts).ok();
+                zip.write_all(bytes).ok();
+            }
             zip.start_file("arena/scripts/usage.mjs", opts).ok();
             zip.write_all(include_str!("../skills/arena/scripts/usage.mjs").as_bytes())
                 .ok();

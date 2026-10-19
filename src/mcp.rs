@@ -41,7 +41,11 @@ fn limiter() -> &'static Mutex<HashMap<Uuid, (u32, Instant)>> {
 }
 
 pub async fn mcp_post(State(app): State<App>, headers: HeaderMap, body: String) -> Response {
-    let agent = match bearer(&app, &headers).await {
+    let parsed = serde_json::from_str::<Value>(&body);
+    let read_only = parsed
+        .as_ref()
+        .is_ok_and(|msg| msg["method"] == "tools/call" && msg["params"]["name"] == "validate_move");
+    let agent = match bearer(&app, &headers, read_only).await {
         Ok(a) => a,
         Err(err) => return Responseish::err(StatusCode::UNAUTHORIZED, err).into_response(),
     };
@@ -52,7 +56,7 @@ pub async fn mcp_post(State(app): State<App>, headers: HeaderMap, body: String) 
         )
         .into_response();
     }
-    let msg: Value = match serde_json::from_str(&body) {
+    let msg: Value = match parsed {
         Ok(v) => v,
         Err(_) => {
             return Responseish::json(
@@ -288,12 +292,15 @@ async fn stream_wait(
     let _ = app.heartbeat_queue(agent.agent_id).await;
     let (out_tx, out_rx) = tokio::sync::mpsc::channel::<String>(16);
     tokio::spawn(async move {
-        let _ = out_tx.send(sse::comment("open")).await;
         let started = Instant::now();
         let mut limit = Duration::from_secs(180);
         let mut limited = false;
         let mut ticks = 0u64;
+        let mut initial_state = None;
         loop {
+            let slot = app.slot(match_id);
+            let notified = slot.notify.notified();
+            tokio::pin!(notified);
             let turn = match app.peek_turn(&agent, match_id).await {
                 Ok(value) => value,
                 Err(err) => {
@@ -309,7 +316,18 @@ async fn stream_wait(
                 limited = true;
             }
             let status = turn.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            let state = stable_state(&turn);
+            let changed = initial_state
+                .as_ref()
+                .is_some_and(|initial| initial != &state);
+            if initial_state.is_none() {
+                initial_state = Some(state);
+                if out_tx.send(sse::comment("open")).await.is_err() {
+                    break;
+                }
+            }
             let done = matches!(status, "your_turn" | "game_over" | "match_over")
+                || changed
                 || started.elapsed() >= limit;
             if done {
                 let result = json!({
@@ -323,9 +341,6 @@ async fn stream_wait(
                     .await;
                 break;
             }
-            let slot = app.slot(match_id);
-            let notified = slot.notify.notified();
-            tokio::pin!(notified);
             tokio::select! {
                 _ = &mut notified => {}
                 _ = tokio::time::sleep(Duration::from_secs(sse::KEEPALIVE_SECS)) => {
@@ -454,6 +469,7 @@ fn stable_state(state: &Value) -> String {
     if let Some(obj) = copy.as_object_mut() {
         obj.remove("remaining_ms");
         obj.remove("remaining_sec");
+        obj.remove("server_time");
     }
     copy.to_string()
 }
@@ -469,6 +485,9 @@ async fn watch_resource(
     let mut inbound = app.slot(match_id).events.subscribe();
     let mut last = String::new();
     loop {
+        let slot = app.slot(match_id);
+        let notified = slot.notify.notified();
+        tokio::pin!(notified);
         if !*stop.borrow() {
             break;
         }
@@ -490,6 +509,7 @@ async fn watch_resource(
             }
         }
         tokio::select! {
+            _ = &mut notified => {}
             changed = stop.changed() => {
                 if changed.is_err() || !*stop.borrow() { break; }
             }
@@ -583,6 +603,10 @@ async fn call_tool(
             let id = parse_match(args)?;
             app.wait_for_turn(agent, id).await
         }
+        "validate_move" => {
+            let id = parse_match(args)?;
+            app.validate_move(agent, id, args).await
+        }
         "make_move" => {
             let id = parse_match(args)?;
             let envelope = args.get("envelope").cloned().unwrap_or(Value::Null);
@@ -640,7 +664,7 @@ fn tools() -> Value {
     json!([
         tool("whoami", "当前智能体身份、权限和已注册公钥。", json!({"type":"object","properties":{}})),
         tool("list_games", "可对弈的游戏、变体、默认限时和超时策略。", json!({"type":"object","properties":{}})),
-        tool("create_room", "创建休闲房间。若这个智能体正在排位，会先离开队列。game 可以是 gomoku、xiangqi、go、junqi、doudizhu、mahjong-sichuan，或已发布的上传规则（id 形如 u_井字棋标识）。上传规则不计入天梯。time_limit_sec 只能是 60、120、180、300，不填则 180。排位固定 180 秒，不看这个参数。", json!({
+        tool("create_room", "创建休闲房间。先用本机 sign.mjs pubkey 和 whoami 核对当前智能体的有效公钥，显式传入本机 kid；同机多个智能体各用独立 ARENA_HOME。成功后除非用户明确只建房，否则先告知房间码，再立即用返回的 match_id 调用 wait_for_turn 等人并持续对弈，不要结束任务或再问是否开始。人数齐后服务器自动开局。若这个智能体正在排位，会先离开队列。game 可以是 gomoku、xiangqi、go、junqi、doudizhu、mahjong-sichuan，或已发布的上传规则（id 形如 u_井字棋标识）。上传规则不计入天梯。time_limit_sec 只能是 60、120、180、300，不填则 180。排位固定 180 秒，不看这个参数。", json!({
             "type":"object",
             "properties":{
                 "game":{"type":"string"},
@@ -653,7 +677,7 @@ fn tools() -> Value {
             },
             "required":["game"]
         })),
-        tool("join_room", "用房间码入座。若这个智能体正在排位，会先离开队列。", json!({
+        tool("join_room", "用房间码入座。先核对本机公钥在当前 whoami.keys 中为 active，显式传入本机 kid；席位绑定后不会因重新注册而更换。成功后除非用户明确只入座，否则立即用返回的 match_id 调用 wait_for_turn，持续等待和对弈到终局，不要再问是否开始。人数齐后服务器自动开局。若这个智能体正在排位，会先离开队列。", json!({
             "type":"object",
             "properties":{"code":{"type":"string"},"kid":{"type":"string"}},
             "required":["code"]
@@ -688,12 +712,29 @@ fn tools() -> Value {
             },
             "required":["match_id"]
         })),
-        tool("wait_for_turn", "等到轮到你或对局结束。客户端接受 text/event-stream 时，这条调用改走 SSE：轮到你立刻返回紧凑局面，等待期间每 15 秒一条注释和一条 progress，可撑过 Cloudflare Tunnel。不接受 SSE 时仍最多阻塞 25 秒后返回 not_your_turn。", json!({
+        tool("wait_for_turn", "建房或入座后立即用返回的 match_id 调用，人数未齐时也用它等人；开局后等到轮到你或对局结束。your_turn 时按 skill 本地签名并 make_move，成功后继续等待；not_your_turn 不是终局，立即再次调用，不要结束任务。客户端接受 text/event-stream 时，这条调用改走 SSE：有人入座/退出、开局或局面变化时主动返回最新状态，轮到你返回紧凑局面和签名请求；等待期间每 15 秒一条注释和一条 progress。不接受 SSE 时仍最多阻塞 25 秒后返回 not_your_turn。", json!({
             "type":"object",
             "properties":{"match_id":{"type":"string"}},
             "required":["match_id"]
         })),
-        tool("make_move", "提交 sign.mjs 产出的签名信封。承诺-揭示时附上 private: {data, salt}。", json!({
+        tool("validate_move", "Validate a full action against the current original signing_request without signing, advancing the match, or persisting a rejection. Returns {valid:true} or {valid:false,error,message}.", json!({
+            "type":"object",
+            "properties":{
+                "match_id":{"type":"string"},
+                "signing_request":{
+                    "type":"object",
+                    "properties":{"domain":{"type":"object"},"payload":{"type":"object"}},
+                    "required":["domain","payload"],
+                    "additionalProperties":false
+                },
+                "action":{"type":"object","properties":{"type":{"type":"string"}},"required":["type"]},
+                "comment":{"type":"string"},
+                "commitment":{"type":"string"},
+                "private":{"type":"object","properties":{"data":{},"salt":{"type":"string"}},"required":["data","salt"]}
+            },
+            "required":["match_id","signing_request","action"]
+        })),
+        tool("make_move", "提交 sign.mjs 产出的签名信封。成功后立即继续 wait_for_turn，直到终局或用户要求停止，不要等用户催下一步。承诺-揭示时附上 private: {data, salt}。", json!({
             "type":"object",
             "properties":{"match_id":{"type":"string"},"envelope":{"type":"object"},"private":{"type":"object"}},
             "required":["match_id","envelope"]
@@ -755,7 +796,7 @@ fn rpc_error(id: Value, code: i32, message: &str) -> Value {
     json!({"jsonrpc":"2.0","id": id, "error": {"code": code, "message": message}})
 }
 
-async fn bearer(app: &App, headers: &HeaderMap) -> Result<AgentCtx, CallError> {
+async fn bearer(app: &App, headers: &HeaderMap, read_only: bool) -> Result<AgentCtx, CallError> {
     let Some(value) = header(headers, "authorization") else {
         return Err(CallError::new(
             401,
@@ -773,7 +814,11 @@ async fn bearer(app: &App, headers: &HeaderMap) -> Result<AgentCtx, CallError> {
             "Authorization 必须是 Bearer 令牌",
         ));
     };
-    app.authenticate(token.trim()).await
+    if read_only {
+        app.authenticate_read_only(token.trim()).await
+    } else {
+        app.authenticate(token.trim()).await
+    }
 }
 
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -794,14 +839,17 @@ fn allow(agent: &Uuid) -> bool {
 const INSTRUCTIONS: &str = "\
 你通过 Agent Arena 下棋。平台只做裁判和中继，看不到你的推理。\
 每一步都必须用本机 arena skill 的 scripts/sign.mjs 签名。\
-循环：wait_for_turn（SSE，返回里已有紧凑局面和 signing_request）→ 想好动作 → `node sign.mjs sign` → make_move。\
+默认把建房、入座或匹配请求接续到这一局结束，除非用户明确只建房、只入座或要求停止。create_room/join_room 成功后可先发进度消息告知房间码，但不要结束任务；立即用返回的 match_id 调用 wait_for_turn 等人。人数齐后服务器自动开局，不需要用户确认或额外的开始工具。\
+循环：wait_for_turn（SSE，返回里已有紧凑局面和 signing_request）→ get_legal_moves 核对并选定动作 → `node sign.mjs sign` → make_move。先确认合法再签，不用签名提交试走；时间紧时选已核实的合法动作。\
+签名时即锁定 (match_id,seat,seq) 的 action/comment/commitment。网络重试保存并原样重发 envelope，不改评论；结果不明先确认是否接受。illegal_action 后不能在同一决策换动作重签，刷新状态不解锁；只核对一次状态与合法列表，仍未推进就如实报告阻碍，不反复尝试拖到超时，不删签名日志或换密钥绕过，也不擅自退出认输。\
+只有 your_turn 才签名提交；not_your_turn、等待人数和 SSE progress 都不是终局。not_your_turn 返回后立即继续等待，make_move 成功后也立即继续等待，不要用 sleep 或 get_state 轮询，不要问用户是否继续。长连接超时/断开时用同一 match_id 重新等待；鉴权、权限或本地签名环境受阻时说明原因。只在 game_over、match_over、房间过期或用户要求停止时结束本局，不自动再开一局。\
 不要为了看棋盘再调 get_state。需要着法列表用 get_legal_moves，需要更早的记录用 get_history。\
 GET /mcp 可订阅 arena://match/<id>/state。也可以用 scripts/listen.mjs 接 GET /api/matches/<id>/events。\
 承诺-揭示先 `node sign.mjs commit data.json`，再 `sign --commitment`，make_move 附上 private。\
-排位用 join_queue，再用 queue_status 取 match_id。queue_status、wait_for_turn 和 ping 会续 5 分钟心跳；过期、leave_queue，或关闭 MCP 会话都会退出队列。create_room 和 join_room 会先离开队列。get_profile 的 queue 字段只读，不续心跳。\
-没有公钥时先 get_key_challenge、签名、register_agent_key。\
+排位用 join_queue，再用 queue_status 取 match_id；返回 matched 后立即进入同一对局循环。queue_status、wait_for_turn 和 ping 会续 5 分钟心跳；过期、leave_queue，或关闭 MCP 会话都会退出队列。create_room 和 join_room 会先离开队列。get_profile 的 queue 字段只读，不续心跳。\
+入座前先用 sign.mjs pubkey 和 whoami 核对本机 kid/public_key 在当前智能体 keys 中且为 active，create_room/join_room/join_queue 显式传 kid。同机多个智能体使用各自的 ARENA_HOME。没有公钥时先 get_key_challenge、签名、register_agent_key，再用 whoami 验证，不能只相信注册返回 ok。key_bound_to_other_agent 要检查令牌或改用当前智能体独立密钥。已绑定席位不能通过重新注册换钥，不要修改 signing_request.payload.kid；未开局可退出后用正确 kid 入座，已开局且旧密钥不可用应告知用户再决定是否认输。\
 休闲房单步限时是 60、120、180 或 300 秒，不填则 180。排位固定 180 秒。以 remaining_ms 为准，超时按 timeout_policy 处理。\
-若客户端给出了本步 token 用量，用技能目录里的 scripts/usage.mjs 记在本机；没有就省略。用量不要发给服务器。\
+每次明确接受的本机落子用 scripts/usage.mjs 记录用量，没有计数则 record --unknown；缺失用时、步数写未知，不能把无记录的默认 0 当实测，整局手数与本机记录数分开。只汇报一次小结，用量不要发给服务器。复盘以服务器终局、历史和实际响应为据，不混用棋规：中国象棋兵卒沿合法移动方向吃子，不是斜吃。\
 开局前 leave_room 腾出席位；开局后 leave_room 判负。对方退出时 wait_for_turn 返回 match_over，reason 为 opponent_left。\
 get_profile 和 update_profile 只改称号、简介、头像和已解锁装扮，不进入签名，也不影响胜负。\
 不要读取 ~/.arena/key。";

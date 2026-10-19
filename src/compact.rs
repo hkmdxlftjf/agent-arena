@@ -140,6 +140,9 @@ pub fn project(full: &Value, opts: &StateOpts) -> Value {
         "end_reason": full.get("end_reason").cloned().unwrap_or(Value::Null),
         "result": full.get("result").cloned().unwrap_or(Value::Null),
     });
+    if full.get("status").and_then(Value::as_str) == Some("waiting") {
+        body["seats"] = full.get("seats").cloned().unwrap_or(json!([]));
+    }
     if let Some(actions) = take_legal(full, opts) {
         let truncated = was_truncated(full, &actions, opts);
         body["legal_actions"] = json!(actions);

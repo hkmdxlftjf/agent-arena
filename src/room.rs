@@ -44,6 +44,11 @@ pub enum Cmd {
         private: Option<Value>,
         reply: oneshot::Sender<Value>,
     },
+    ValidateMove {
+        agent_id: Uuid,
+        args: Value,
+        reply: oneshot::Sender<Value>,
+    },
     Resign {
         agent_id: Uuid,
         reply: oneshot::Sender<Value>,
@@ -110,6 +115,12 @@ struct Secret {
     commitment: String,
     data: Value,
     salt: String,
+}
+
+struct MoveError {
+    code: &'static str,
+    message: String,
+    extra: Value,
 }
 
 struct RoomSnapshot {
@@ -331,6 +342,21 @@ impl Engine {
         });
         let engine = Self::read(pool, server, origin, id, slot, 0, room_wait_ms).await?;
         Ok(engine.public_json())
+    }
+
+    pub async fn read_validation(
+        pool: PgPool,
+        server: ServerKey,
+        origin: String,
+        id: Uuid,
+        agent_id: Uuid,
+        args: &Value,
+        max_match_duration_ms: i64,
+    ) -> anyhow::Result<Value> {
+        // Do not begin/spawn an actor: startup can execute overdue decisions.
+        let slot = Hub::new().slot(id);
+        let engine = Self::read(pool, server, origin, id, slot, max_match_duration_ms, 0).await?;
+        Ok(engine.validate_move(agent_id, args).await)
     }
 
     async fn read(
@@ -601,6 +627,14 @@ impl Engine {
             } => {
                 self.mark_seen(agent_id).await;
                 let value = self.handle_move(agent_id, envelope, private).await;
+                let _ = reply.send(value);
+            }
+            Cmd::ValidateMove {
+                agent_id,
+                args,
+                reply,
+            } => {
+                let value = self.validate_move(agent_id, &args).await;
                 let _ = reply.send(value);
             }
             Cmd::Resign { agent_id, reply } => {
@@ -1284,6 +1318,171 @@ impl Engine {
         accepted_from(&resign, false)
     }
 
+    fn signing_request(&self, player: &Player, decision: &Decision) -> Value {
+        json!({
+            "domain": domain(&self.chain.origin, "move"),
+            "payload": {
+                "v": 1,
+                "match_id": self.match_id.to_string(),
+                "game_id": self.game_id,
+                "game_version": self.game_version,
+                "rules_hash": self.rules_hash,
+                "seat": player.seat,
+                "agent_id": player.agent_id.to_string(),
+                "kid": player.kid,
+                "seq": decision.seq,
+                "prev_hash": decision.prev_hash,
+                "deadline_at": decision.deadline_at,
+            }
+        })
+    }
+
+    async fn validate_move(&self, agent_id: Uuid, args: &Value) -> Value {
+        let reject =
+            |code: &str, message: &str| json!({"valid": false, "error": code, "message": message});
+        let Some(player) = self.players.iter().find(|p| p.agent_id == agent_id) else {
+            return reject("not_seated", "You are not seated in this match");
+        };
+        if self.status != "running" || self.duration_due() {
+            return reject("game_over", "The match is not running");
+        }
+        let Some(decision) = self.decisions.iter().find(|d| d.seat == player.seat) else {
+            return reject("seq_mismatch", "There is no current decision for this seat");
+        };
+        if args.get("signing_request") != Some(&self.signing_request(player, decision)) {
+            return reject(
+                "context_mismatch",
+                "signing_request is not the current original request",
+            );
+        }
+        // Preflight expires at the original deadline, not the submission grace period.
+        if now_ms() > decision.deadline_at {
+            return reject("deadline_passed", "The original request has expired");
+        }
+        let key_status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM agent_keys WHERE kid = $1 AND agent_id = $2",
+        )
+        .bind(&player.kid)
+        .bind(agent_id)
+        .fetch_optional(&self.pool)
+        .await;
+        match key_status {
+            Ok(Some(status)) if status == "active" || status == "rotated" => {}
+            Ok(Some(status)) if status == "revoked" => {
+                return reject("key_revoked", "The match key has been revoked");
+            }
+            Ok(_) => return reject("unknown_key", "The match key is unavailable"),
+            Err(_) => return reject("validation_unavailable", "Unable to read the match key"),
+        }
+        if args.get("action").and_then(Value::as_object).is_none()
+            || args["action"].get("type").and_then(Value::as_str).is_none()
+            || args["action"].get("_private").is_some()
+        {
+            return reject(
+                "illegal_action",
+                "Provide an action object with a string type; use private for secrets",
+            );
+        }
+        for name in ["comment", "commitment"] {
+            if args.get(name).is_some_and(|value| !value.is_string()) {
+                return reject(
+                    "invalid_arguments",
+                    "comment and commitment must be strings",
+                );
+            }
+        }
+        match self.apply_move(player, decision.seq, args, args.get("private")) {
+            Ok(_) => json!({"valid": true}),
+            Err(error) => reject(error.code, &error.message),
+        }
+    }
+
+    // Shared by signed submission and preflight. Only the caller installs the
+    // returned state/secret; RNG, state changes and game events remain local.
+    fn apply_move(
+        &self,
+        player: &Player,
+        seq: i64,
+        payload: &Value,
+        private: Option<&Value>,
+    ) -> Result<(Value, Option<Secret>), MoveError> {
+        let reject = |code: &'static str, message: String| MoveError {
+            code,
+            message,
+            extra: json!({}),
+        };
+        if let Some(comment) = payload.get("comment").and_then(Value::as_str) {
+            if comment.chars().count() > 140 {
+                return Err(reject("comment_too_long", "评论不能超过 140 字".into()));
+            }
+            if !self.allow_comments || !player.allow_comments {
+                return Err(reject(
+                    "comment_disabled",
+                    "本局或该智能体未开启公开评论".into(),
+                ));
+            }
+        }
+        let Some(state) = self.state.as_ref() else {
+            return Err(reject(
+                "validation_unavailable",
+                "Match state is unavailable".into(),
+            ));
+        };
+        let action = payload.get("action").cloned().unwrap_or(Value::Null);
+        let legal = self
+            .game
+            .legal_actions(state, player.seat)
+            .unwrap_or_default();
+        let illegal = |message: String| MoveError {
+            code: "illegal_action",
+            message,
+            extra: json!({"legal_count": legal.len()}),
+        };
+        if !legal.iter().any(|a| a.get("type") == action.get("type")) {
+            return Err(illegal(
+                "这一步不合法。用 get_legal_moves 看可以走的步".into(),
+            ));
+        }
+        let mut apply_action = action;
+        let mut staged_secret = None;
+        if let Some(commitment) = payload.get("commitment").and_then(Value::as_str) {
+            let Some(private) = private else {
+                return Err(reject(
+                    "missing_private",
+                    "带 commitment 的动作必须附上 private".into(),
+                ));
+            };
+            let data = private.get("data").cloned().unwrap_or(Value::Null);
+            let salt = private.get("salt").and_then(Value::as_str).unwrap_or("");
+            if commitment_of(&data, salt).as_deref() != Some(commitment) {
+                return Err(reject("bad_commitment", "承诺和私密数据对不上".into()));
+            }
+            if let Some(obj) = apply_action.as_object_mut() {
+                obj.insert(
+                    "_private".into(),
+                    json!({"data": data.clone(), "salt": salt}),
+                );
+            }
+            staged_secret = Some(Secret {
+                seat: player.seat,
+                commitment: commitment.to_string(),
+                data,
+                salt: salt.to_string(),
+            });
+        } else if private.is_some() {
+            return Err(reject(
+                "unexpected_private",
+                "没有 commitment 时不要附带 private".into(),
+            ));
+        }
+        let mut rng = crate::game::SeededRng::from_seed_seq(&self.seed, seq);
+        let (next, _) = self
+            .game
+            .apply(state, player.seat, &apply_action, &mut rng)
+            .map_err(|err| illegal(format!("{}。用 get_legal_moves 看可以走的步", err.0)))?;
+        Ok((next, staged_secret))
+    }
+
     async fn handle_move(
         &mut self,
         agent_id: Uuid,
@@ -1310,7 +1509,6 @@ impl Engine {
         let player_seat = player.seat;
         let player_kid = player.kid.clone();
         let player_pub = player.public_b64.clone();
-        let player_comments = player.allow_comments;
         let match_id_str = self.match_id.to_string();
         let agent_str = agent_id.to_string();
 
@@ -1540,88 +1738,22 @@ impl Engine {
                 json!({}),
             );
         }
-        if let Some(comment) = payload.get("comment").and_then(|v| v.as_str()) {
-            if comment.chars().count() > 140 {
-                return self.nack(
-                    "comment_too_long",
-                    "评论不能超过 140 字",
-                    Some(player_seat),
-                    &payload,
-                    json!({}),
-                );
-            }
-            if !self.allow_comments || !player_comments {
-                return self.nack(
-                    "comment_disabled",
-                    "本局或该智能体未开启公开评论",
-                    Some(player_seat),
-                    &payload,
-                    json!({}),
-                );
-            }
-        }
-        let action = payload.get("action").cloned().unwrap_or(Value::Null);
-        let legal = self
-            .game
-            .legal_actions(self.state.as_ref().unwrap(), player_seat)
-            .unwrap_or_default();
-        if !legal.iter().any(|a| a.get("type") == action.get("type")) {
-            return self.nack(
-                "illegal_action",
-                "这一步不合法。用 get_legal_moves 看可以走的步",
-                Some(player_seat),
-                &payload,
-                json!({"legal_count": legal.len()}),
-            );
-        }
-        let commitment = payload
-            .get("commitment")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let mut apply_action = action.clone();
-        let mut staged_secret: Option<Secret> = None;
-        if let Some(commitment) = commitment {
-            let Some(private) = private.as_ref() else {
-                return self.nack(
-                    "missing_private",
-                    "带 commitment 的动作必须附上 private",
-                    Some(player_seat),
-                    &payload,
-                    json!({}),
-                );
+        let Some(player) = self.players.iter().find(|p| p.agent_id == agent_id) else {
+            return json!({"accepted": false, "error": "not_seated", "message": "你不在这局里"});
+        };
+        let (next, staged_secret) =
+            match self.apply_move(player, signed_seq, &payload, private.as_ref()) {
+                Ok(applied) => applied,
+                Err(error) => {
+                    return self.nack(
+                        error.code,
+                        error.message,
+                        Some(player_seat),
+                        &payload,
+                        error.extra,
+                    );
+                }
             };
-            let data = private.get("data").cloned().unwrap_or(Value::Null);
-            let salt = private.get("salt").and_then(|v| v.as_str()).unwrap_or("");
-            if commitment_of(&data, salt).as_deref() != Some(commitment.as_str()) {
-                return self.nack(
-                    "bad_commitment",
-                    "承诺和私密数据对不上",
-                    Some(player_seat),
-                    &payload,
-                    json!({}),
-                );
-            }
-            if let Some(obj) = apply_action.as_object_mut() {
-                obj.insert(
-                    "_private".into(),
-                    json!({"data": data.clone(), "salt": salt}),
-                );
-            }
-            staged_secret = Some(Secret {
-                seat: player_seat,
-                commitment,
-                data,
-                salt: salt.to_string(),
-            });
-        } else if private.is_some() {
-            return self.nack(
-                "unexpected_private",
-                "没有 commitment 时不要附带 private",
-                Some(player_seat),
-                &payload,
-                json!({}),
-            );
-        }
 
         let backup_chain = self.chain.clone();
         let backup_state = self.state.clone();
@@ -1631,24 +1763,7 @@ impl Engine {
         let backup_reason = self.end_reason.clone();
         let backup_players = self.player_backup();
         let backup_secrets = self.secrets.clone();
-        let mut rng = crate::game::SeededRng::from_seed_seq(&self.seed, signed_seq);
-        match self.game.apply(
-            self.state.as_ref().unwrap(),
-            player_seat,
-            &apply_action,
-            &mut rng,
-        ) {
-            Ok((next, _)) => self.state = Some(next),
-            Err(err) => {
-                return self.nack(
-                    "illegal_action",
-                    format!("{}。用 get_legal_moves 看可以走的步", err.0),
-                    Some(player_seat),
-                    &payload,
-                    json!({"legal_count": legal.len()}),
-                );
-            }
-        }
+        self.state = Some(next);
         if let Some(secret) = staged_secret {
             self.secrets.push(secret);
         }
@@ -1984,22 +2099,7 @@ impl Engine {
             if let Some(d) = self.decisions.iter().find(|d| d.seat == player.seat) {
                 let remaining = (d.deadline_at - now_ms()).max(0);
                 body["remaining_ms"] = json!(remaining);
-                body["signing_request"] = json!({
-                    "domain": domain(&self.chain.origin, "move"),
-                    "payload": {
-                        "v": 1,
-                        "match_id": self.match_id.to_string(),
-                        "game_id": self.game_id,
-                        "game_version": self.game_version,
-                        "rules_hash": self.rules_hash,
-                        "seat": player.seat,
-                        "agent_id": player.agent_id.to_string(),
-                        "kid": player.kid,
-                        "seq": d.seq,
-                        "prev_hash": d.prev_hash,
-                        "deadline_at": d.deadline_at,
-                    }
-                });
+                body["signing_request"] = self.signing_request(player, d);
             }
         } else {
             body["legal_actions"] = json!([]);

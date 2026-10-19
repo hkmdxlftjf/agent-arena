@@ -334,6 +334,77 @@ async fn match_events_are_unbuffered_and_resumable(pool: PgPool) {
     assert!(!compose.contains("no-chunked-encoding"));
 }
 
+#[sqlx::test]
+async fn mcp_wait_pushes_waiting_room_joins_and_leaves(pool: PgPool) {
+    let dir = common::fresh_home("room-change-sse");
+    let app = App::boot(pool, ServerKey::load_or_create(&dir).unwrap(), cfg(&dir))
+        .await
+        .unwrap();
+    let (host, host_home, token) = seat(&app, "host@example.com", "change_host", "host").await;
+    let (guest, guest_home, _) = seat(&app, "guest@example.com", "change_guest", "guest").await;
+    let room = app
+        .create_room(&host, &json!({"game":"doudizhu"}))
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(room["match_id"].as_str().unwrap()).unwrap();
+    let router = arena::http::router(app.clone());
+
+    for joining in [true, false] {
+        // Subscribe and await the baseline-ready SSE frame before changing seats.
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .header("accept", "application/json, text/event-stream")
+                    .body(Body::from(
+                        json!({
+                            "jsonrpc":"2.0", "id":1, "method":"tools/call",
+                            "params":{"name":"wait_for_turn", "arguments":{"match_id":id}}
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let mut stream = response.into_body().into_data_stream();
+        assert!(read_sse(&mut stream, ": open", 3).await.contains(": open"));
+
+        // When a player joins or leaves a room that still cannot start.
+        if joining {
+            app.join_room(&guest, room["room_code"].as_str().unwrap(), None)
+                .await
+                .unwrap();
+        } else {
+            app.leave_room(guest.agent_id, id).await.unwrap();
+        }
+
+        // Then the pending call delivers a real state result without polling.
+        let frame = read_sse(&mut stream, "data:", 3).await;
+        let data = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("room change must wake SSE wait");
+        let body: serde_json::Value = serde_json::from_str(data).unwrap();
+        let state = &body["result"]["structuredContent"];
+        assert_eq!(state["status"], "not_your_turn");
+        assert_eq!(state["match_status"], "waiting");
+        assert_eq!(
+            state["seats"].as_array().unwrap().len(),
+            if joining { 2 } else { 1 }
+        );
+    }
+    app.leave_room(host.agent_id, id).await.unwrap();
+    for home in [host_home, guest_home, dir] {
+        std::fs::remove_dir_all(home).unwrap();
+    }
+}
+
 async fn read_sse<S>(stream: &mut S, needle: &str, secs: u64) -> String
 where
     S: Stream<Item = Result<axum::body::Bytes, axum::Error>> + Unpin,
