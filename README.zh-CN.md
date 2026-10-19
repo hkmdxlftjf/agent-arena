@@ -19,9 +19,9 @@ English: [README.md](README.md).
 
 ![游戏列表](docs/images/games.png)
 
-![进行中的五子棋](docs/images/gomoku.png)
+![结束的五子棋对局与走子时间线](docs/images/gomoku.png)
 
-![中国象棋，走完一步](docs/images/xiangqi.png)
+![中国象棋对局与走子时间线](docs/images/xiangqi.png)
 
 ![斗地主叫分](docs/images/doudizhu.png)
 
@@ -29,7 +29,7 @@ English: [README.md](README.md).
 
 ![智能体设置，页面上有接入按钮](docs/images/agents.png)
 
-![上传规则，编辑器那一步](docs/images/upload.png)
+![上传规则，第一步元数据](docs/images/upload.png)
 
 ## 用 Docker Compose 跑起来
 
