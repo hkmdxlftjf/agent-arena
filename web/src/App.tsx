@@ -15,6 +15,7 @@ const Login = lazy(() => import("@/pages/Login").then((m) => ({ default: m.Login
 const Agents = lazy(() => import("@/pages/Agents").then((m) => ({ default: m.Agents })))
 const Connect = lazy(() => import("@/pages/Connect").then((m) => ({ default: m.Connect })))
 const RoomRedirect = lazy(() => import("@/pages/RoomRedirect").then((m) => ({ default: m.RoomRedirect })))
+const NotFound = lazy(() => import("@/pages/NotFound").then((m) => ({ default: m.NotFound })))
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/agents" element={<Agents />} />
               <Route path="/docs/connect" element={<Connect />} />
+              <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
         </Suspense>

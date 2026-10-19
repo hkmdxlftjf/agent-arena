@@ -3,6 +3,7 @@ import { boardPaint, gomokuStone, xiangqiDisc } from "@/cosmetics/skins"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import type { AgentRow } from "@/lib/types"
+import { Check, ImageUp, Lock, Palette } from "lucide-react"
 import { useEffect, useState } from "react"
 
 type Item = {
@@ -100,7 +101,12 @@ export function DressPanel({ agents }: { agents: AgentRow[] }) {
   }
 
   if (agents.length === 0) {
-    return <p className="mt-6 text-sm text-muted-foreground">先创建一个智能体，再给它挑装扮。</p>
+    return (
+      <div className="empty-state mt-6">
+        <Palette className="size-6" aria-hidden />
+        <p>先创建一个智能体，再给它挑装扮。</p>
+      </div>
+    )
   }
 
   const unlocked = new Set(bundle?.unlocks ?? [])
@@ -110,45 +116,51 @@ export function DressPanel({ agents }: { agents: AgentRow[] }) {
   const frame = bundle?.frame
 
   return (
-    <div className="mt-6 grid gap-6 lg:grid-cols-[280px_1fr]">
-      <Preview game={game} color={color} preset={bundle?.avatar_preset} imageUrl={bundle?.avatar_url} frame={frame} title={title} piece={piece} board={board} />
-      <div className="space-y-5">
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <div className="flex flex-wrap gap-2">
+    <div className="mt-4 grid items-start gap-6 lg:grid-cols-[280px_1fr]">
+      <div className="lg:sticky lg:top-24">
+        <Preview game={game} color={color} preset={bundle?.avatar_preset} imageUrl={bundle?.avatar_url} frame={frame} title={title} piece={piece} board={board} />
+      </div>
+      <div className="min-w-0 space-y-4">
+        {error && (
+          <p className="alert-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="chip-row" role="toolbar" aria-label="选择智能体">
           {agents.map((agent) => (
-            <button
-              key={agent.id}
-              type="button"
-              onClick={() => setAgentId(agent.id)}
-              className={`rounded-full px-3 py-1 text-sm ${agent.id === agentId ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
-            >
+            <button key={agent.id} type="button" onClick={() => setAgentId(agent.id)} className="chip chip-solid" aria-pressed={agent.id === agentId}>
               {agent.name}
             </button>
           ))}
         </div>
+        {!bundle && !error && <div className="skeleton h-64" aria-busy="true" />}
         {bundle && (
-          <>
-            <section>
-              <h2 className="text-sm font-medium">头像</h2>
-              <div className="mt-2 flex flex-wrap gap-2">
+          <div key={agentId} className="fade-in space-y-4">
+            <section className="panel p-4">
+              <h2 className="text-sm font-semibold">头像</h2>
+              <div className="mt-3 flex flex-wrap gap-2">
                 {bundle.presets.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
                     title={preset.name}
+                    aria-label={preset.name}
+                    aria-pressed={bundle.avatar_preset === preset.id}
                     onClick={() => void save({ avatar_preset: preset.id })}
-                    className={`rounded-full p-0.5 ${bundle.avatar_preset === preset.id ? "ring-2 ring-primary" : ""}`}
+                    className="loadout-avatar"
                   >
                     <Avatar preset={preset.id} color={color} size={40} />
                   </button>
                 ))}
               </div>
-              <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-border bg-secondary px-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-muted">
+                <ImageUp className="size-4" aria-hidden />
                 上传图片
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/gif,image/webp"
-                  className="max-w-48 text-xs"
+                  className="sr-only"
                   onChange={(event) => {
                     const file = event.target.files?.[0]
                     event.target.value = ""
@@ -172,31 +184,35 @@ export function DressPanel({ agents }: { agents: AgentRow[] }) {
                 />
               </label>
               {bundle.avatar_url && (
-                <button type="button" className="ml-3 text-sm text-primary" onClick={() => void save({ clear_avatar: true })}>
+                <button type="button" className="py-1 text-sm font-medium text-primary hover:underline" onClick={() => void save({ clear_avatar: true })}>
                   改回头像预设
                 </button>
               )}
+              </div>
             </section>
             <form
-              className="grid gap-2 sm:grid-cols-2"
+              className="panel grid gap-3 p-4 sm:grid-cols-2"
               onSubmit={(event) => {
                 event.preventDefault()
                 void save({ title, bio, color })
               }}
             >
-              <label className="text-sm">
+              <label className="grid gap-1 text-xs font-medium text-muted-foreground">
                 称号
-                <input value={title} maxLength={12} onChange={(event) => setTitle(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5" />
+                <input value={title} maxLength={12} onChange={(event) => setTitle(event.target.value)} className="field w-full" />
               </label>
-              <label className="text-sm">
+              <label className="grid gap-1 text-xs font-medium text-muted-foreground">
                 颜色
-                <input type="color" value={color} onChange={(event) => setColor(event.target.value)} className="mt-1 h-9 w-full" />
+                <span className="field flex w-full items-center gap-2 px-1.5">
+                  <input type="color" value={color} onChange={(event) => setColor(event.target.value)} className="h-6 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
+                  <span className="font-data text-sm text-foreground">{color}</span>
+                </span>
               </label>
-              <label className="text-sm sm:col-span-2">
+              <label className="grid gap-1 text-xs font-medium text-muted-foreground sm:col-span-2">
                 短简介
-                <input value={bio} maxLength={80} onChange={(event) => setBio(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5" />
+                <input value={bio} maxLength={80} onChange={(event) => setBio(event.target.value)} className="field w-full" />
               </label>
-              <Button type="submit" size="sm" className="w-fit">
+              <Button type="submit" className="w-fit">
                 保存外观
               </Button>
             </form>
@@ -207,18 +223,14 @@ export function DressPanel({ agents }: { agents: AgentRow[] }) {
               selected={bundle.frame_id}
               onPick={(item) => void save({ frame_id: item?.id ?? "" })}
             />
-            <div className="flex gap-2 overflow-x-auto">
+            <div className="chip-row" role="toolbar" aria-label="选择游戏">
               {GAMES.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  onClick={() => setGame(row.id)}
-                  className={`shrink-0 rounded-full px-3 py-1 text-sm ${game === row.id ? "bg-secondary text-foreground" : "text-muted-foreground"}`}
-                >
+                <button key={row.id} type="button" onClick={() => setGame(row.id)} className="chip chip-solid" aria-pressed={game === row.id}>
                   {row.name}
                 </button>
               ))}
             </div>
+            <div key={game} className="fade-in space-y-4">
             <ItemRow
               title="棋子"
               items={bundle.items.filter((item) => item.kind === "piece" && item.game_id === game)}
@@ -251,7 +263,8 @@ export function DressPanel({ agents }: { agents: AgentRow[] }) {
               selected={equipped("emote")}
               onPick={(item) => void save({ equip: [{ game_id: game, kind: "emote", item_id: item?.id ?? "" }] })}
             />
-          </>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -273,9 +286,9 @@ function ItemRow({
 }) {
   if (items.length === 0) return null
   return (
-    <section>
-      <h2 className="text-sm font-medium">{title}</h2>
-      <div className="mt-2 flex flex-wrap gap-2">
+    <section className="panel p-4">
+      <h2 className="text-sm font-semibold">{title}</h2>
+      <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
         {items.map((item) => {
           const open = item.unlock_rule === "default" || unlocked.has(item.id)
           const active = selected === item.id || (!selected && item.unlock_rule === "default" && item.asset !== "none")
@@ -284,11 +297,16 @@ function ItemRow({
               key={item.id}
               type="button"
               disabled={!open}
+              aria-pressed={active}
               onClick={() => onPick(active && selected === item.id ? null : item)}
-              className={`rounded-lg border px-2 py-1 text-left text-sm ${active ? "border-primary" : "border-border"} ${open ? "" : "opacity-50"}`}
+              className="loadout-item"
+              data-rarity={item.rarity}
             >
-              <span className="block font-medium">{item.name}</span>
-              <span className="block text-xs text-muted-foreground">{open ? "已解锁" : RULE_TEXT[item.unlock_rule] || item.unlock_rule}</span>
+              <span className="flex items-center justify-between gap-1">
+                <span className="truncate font-medium">{item.name}</span>
+                {active ? <Check className="size-3.5 shrink-0 text-primary" aria-hidden /> : !open ? <Lock className="size-3.5 shrink-0" aria-hidden /> : null}
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">{open ? (active ? "已装备" : "已解锁") : RULE_TEXT[item.unlock_rule] || item.unlock_rule}</span>
             </button>
           )
         })}
@@ -322,7 +340,8 @@ function Preview({
   const red = xiangqiDisc(piece, true)
   const black = xiangqiDisc(piece, false)
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <div className="panel stage p-4">
+      <p className="eyebrow mb-3">Preview</p>
       <div className="mb-3 flex items-center gap-2">
         <Avatar preset={preset} color={color} frame={frame} imageUrl={imageUrl} size={48} />
         <div>

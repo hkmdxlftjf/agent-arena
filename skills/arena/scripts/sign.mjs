@@ -7,6 +7,7 @@ import { createHash, generateKeyPairSync, createPrivateKey, createPublicKey,
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { acquireSignLock, writeSignedAtomic } from './sign-lock.mjs';
 
 const VERSION = '1.0.0';
 const DIR = process.env.ARENA_HOME || join(homedir(), '.arena');
@@ -106,7 +107,7 @@ function signCmd({ flags, pos }) {
   payload.kid = k.kid;
   if (typeof payload.expires_at === 'number' && Date.now() > payload.expires_at) die('request expired; fetch a new one');
 
-  let slot, intent, db;
+  let slot, intent;
   if (domain.purpose === 'move') {
     if (flags.action !== undefined) payload.action = typeof flags.action === 'string' ? JSON.parse(flags.action) : flags.action;
     if (typeof flags.comment === 'string') payload.comment = flags.comment;
@@ -119,28 +120,35 @@ function signCmd({ flags, pos }) {
     // double-sign protection: one action per (match, seat, decision seq)
     slot = `${payload.match_id}:${payload.seat}:${payload.seq}`;
     intent = hex(sha256(canon({ a: payload.action, c: payload.comment ?? null, m: payload.commitment ?? null })));
-    db = existsSync(SIGNED) ? JSON.parse(readFileSync(SIGNED, 'utf8')) : {};
-    const prev = db[slot];
-    if (prev) {
-      if (prev.intent === intent) return out(prev.envelope); // idempotent retry: identical envelope
-      die(`double-sign refused: ${slot} was already signed with a different action`);
-    }
-    payload.issued_at = Date.now();
   } else if (domain.purpose === 'register_key') {
     payload.public_key = k.pub; payload.alg = 'ed25519';
   } else die(`unknown domain.purpose "${domain.purpose}"`);
 
-  const envelope = { domain, payload, alg: 'ed25519', kid: k.kid,
-    signature: edSign(null, signingInput(domain, payload), k.priv).toString('base64url'),
-    client: `arena-skill/${VERSION}` };
-  if (slot) {
-    const cutoff = Date.now() - 30 * 864e5; // prune entries older than 30 days
-    for (const [s, v] of Object.entries(db)) if (v.at < cutoff) delete db[s];
-    db[slot] = { intent, envelope, at: Date.now() };
-    mkdirSync(DIR, { recursive: true, mode: 0o700 });
-    writePrivate(SIGNED, JSON.stringify(db));
+  const release = slot ? acquireSignLock(DIR) : undefined;
+  try {
+    let db;
+    if (slot) {
+      db = existsSync(SIGNED) ? JSON.parse(readFileSync(SIGNED, 'utf8')) : {};
+      const prev = db[slot];
+      if (prev) {
+        if (prev.intent === intent) return out(prev.envelope); // idempotent retry: identical envelope
+        throw new Error(`double-sign refused: ${slot} was already signed with a different action`);
+      }
+      payload.issued_at = Date.now();
+    }
+    const envelope = { domain, payload, alg: 'ed25519', kid: k.kid,
+      signature: edSign(null, signingInput(domain, payload), k.priv).toString('base64url'),
+      client: `arena-skill/${VERSION}` };
+    if (slot) {
+      const cutoff = Date.now() - 30 * 864e5; // prune entries older than 30 days
+      for (const [s, v] of Object.entries(db)) if (v.at < cutoff) delete db[s];
+      db[slot] = { intent, envelope, at: Date.now() };
+      writeSignedAtomic(SIGNED, JSON.stringify(db));
+    }
+    out(envelope);
+  } finally {
+    release?.();
   }
-  out(envelope);
 }
 
 const commitmentOf = (data, saltHex) =>

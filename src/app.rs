@@ -657,11 +657,13 @@ impl App {
         if name.chars().count() < 1 || name.chars().count() > 40 {
             return Err(CallError::new(400, "bad_name", "智能体名称需要 1–40 个字"));
         }
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM agents WHERE owner_id = $1")
-            .bind(user.id)
-            .fetch_one(self.pool())
-            .await
-            .map_err(db_err)?;
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM agents WHERE owner_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(user.id)
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)?;
         if count >= 5 {
             return Err(CallError::new(
                 400,
@@ -707,7 +709,7 @@ impl App {
         >(
             r#"SELECT id, name, description, model_label, allow_comments, last_seen_at,
                       title, bio, color, avatar_preset, avatar_image, frame_id
-               FROM agents WHERE owner_id = $1 ORDER BY created_at"#,
+               FROM agents WHERE owner_id = $1 AND deleted_at IS NULL ORDER BY created_at"#,
         )
         .bind(user.id)
         .fetch_all(self.pool())
@@ -849,14 +851,61 @@ impl App {
         Ok(())
     }
 
+    pub async fn delete_agent(&self, user: &User, agent_id: Uuid) -> Result<(), CallError> {
+        // Serialize deletion with matchmaking and room/queue admission.
+        let _guard = queue_lock().lock().await;
+        let mut tx = self.pool().begin().await.map_err(db_err)?;
+        let owned: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM agents WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL FOR UPDATE",
+        )
+        .bind(agent_id)
+        .bind(user.id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        if owned.is_none() {
+            return Err(CallError::new(404, "not_found", "找不到这个智能体"));
+        }
+        let seated: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                SELECT 1 FROM match_players mp JOIN matches m ON m.id = mp.match_id
+                WHERE mp.agent_id = $1 AND m.status IN ('waiting', 'running')
+            )"#,
+        )
+        .bind(agent_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        if seated {
+            return Err(CallError::new(
+                409,
+                "agent_in_match",
+                "智能体正在等待或进行对局，请先离开对局再删除",
+            ));
+        }
+        sqlx::query("DELETE FROM match_queue WHERE agent_id = $1")
+            .bind(agent_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query("UPDATE agents SET deleted_at = now() WHERE id = $1")
+            .bind(agent_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(())
+    }
+
     async fn owned_agent(&self, user: &User, agent_id: Uuid) -> Result<(), CallError> {
-        let ok: Option<Uuid> =
-            sqlx::query_scalar("SELECT id FROM agents WHERE id = $1 AND owner_id = $2")
-                .bind(agent_id)
-                .bind(user.id)
-                .fetch_optional(self.pool())
-                .await
-                .map_err(db_err)?;
+        let ok: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM agents WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL",
+        )
+        .bind(agent_id)
+        .bind(user.id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
         if ok.is_none() {
             return Err(CallError::new(404, "not_found", "找不到这个智能体"));
         }
@@ -864,12 +913,24 @@ impl App {
     }
 
     pub async fn authenticate(&self, token: &str) -> Result<AgentCtx, CallError> {
+        let agent = self.authenticate_read_only(token).await?;
+        sqlx::query("UPDATE agent_tokens SET last_used_at = now() WHERE id = $1")
+            .bind(agent.token_id)
+            .execute(self.pool())
+            .await
+            .ok();
+        self.touch(agent.agent_id).await;
+        Ok(agent)
+    }
+
+    /// Authenticate preflight without updating token or agent timestamps.
+    pub async fn authenticate_read_only(&self, token: &str) -> Result<AgentCtx, CallError> {
         let hash = sha256(token.as_bytes());
         let row = sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, bool, Vec<String>)>(
             r#"SELECT t.id, a.id, a.owner_id, a.name, a.allow_comments, t.scopes
                FROM agent_tokens t
                JOIN agents a ON a.id = t.agent_id
-               WHERE t.token_hash = $1 AND t.revoked_at IS NULL
+               WHERE t.token_hash = $1 AND t.revoked_at IS NULL AND a.deleted_at IS NULL
                  AND (t.expires_at IS NULL OR t.expires_at > now())"#,
         )
         .bind(hash.as_slice())
@@ -879,16 +940,6 @@ impl App {
         let Some((token_id, agent_id, owner_id, name, allow_comments, scopes)) = row else {
             return Err(CallError::new(401, "unauthorized", "令牌无效或已吊销"));
         };
-        sqlx::query("UPDATE agent_tokens SET last_used_at = now() WHERE id = $1")
-            .bind(token_id)
-            .execute(self.pool())
-            .await
-            .ok();
-        sqlx::query("UPDATE agents SET last_seen_at = now() WHERE id = $1")
-            .bind(agent_id)
-            .execute(self.pool())
-            .await
-            .ok();
         Ok(AgentCtx {
             agent_id,
             owner_id,
@@ -1086,21 +1137,36 @@ impl App {
             return Err(CallError::new(400, "context_mismatch", "挑战内容不匹配"));
         }
         let _ = stored;
-        let existing: Option<String> =
-            sqlx::query_scalar("SELECT public_key_b64 FROM agent_keys WHERE kid = $1")
-                .bind(kid)
-                .fetch_optional(self.pool())
-                .await
-                .map_err(db_err)?;
-        if let Some(prev) = existing {
-            if prev == public_b64 {
-                return Ok(json!({"ok": true, "kid": kid, "idempotent": true}));
+        let existing: Option<(Uuid, String, String)> = sqlx::query_as(
+            "SELECT agent_id, public_key_b64, status FROM agent_keys WHERE kid = $1",
+        )
+        .bind(kid)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(db_err)?;
+        if let Some((owner, prev, status)) = existing {
+            if prev != public_b64 {
+                return Err(CallError::new(
+                    409,
+                    "key_mismatch",
+                    "这个 kid 已属于其他密钥",
+                ));
             }
-            return Err(CallError::new(
-                409,
-                "key_mismatch",
-                "这个 kid 已属于其他密钥",
-            ));
+            if owner != agent.agent_id {
+                return Err(CallError::new(
+                    409,
+                    "key_bound_to_other_agent",
+                    "这把本机密钥已注册给另一个智能体；请确认令牌，或为当前智能体使用独立的 ARENA_HOME 注册新密钥",
+                ));
+            }
+            if status != "active" {
+                return Err(CallError::new(
+                    409,
+                    "key_inactive",
+                    "这把密钥已轮换或吊销，不能通过重复注册恢复；请使用新密钥，并在入座时明确指定 kid",
+                ));
+            }
+            return Ok(json!({"ok": true, "kid": kid, "idempotent": true}));
         }
         let active: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM agent_keys WHERE agent_id = $1 AND status = 'active'",
@@ -1142,6 +1208,8 @@ impl App {
     }
 
     pub async fn create_room(&self, agent: &AgentCtx, body: &Value) -> Result<Value, CallError> {
+        let _guard = queue_lock().lock().await;
+        crate::cosmetics::owned(self.pool(), agent.owner_id, agent.agent_id).await?;
         let game_id = body
             .get("game")
             .and_then(|v| v.as_str())
@@ -1263,7 +1331,7 @@ impl App {
         body: &Value,
     ) -> Result<Value, CallError> {
         let row = sqlx::query_as::<_, (String, bool)>(
-            "SELECT name, allow_comments FROM agents WHERE id = $1 AND owner_id = $2",
+            "SELECT name, allow_comments FROM agents WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL",
         )
         .bind(agent_id)
         .bind(user.id)
@@ -1304,6 +1372,8 @@ impl App {
         code: &str,
         kid: Option<&str>,
     ) -> Result<Value, CallError> {
+        let _guard = queue_lock().lock().await;
+        crate::cosmetics::owned(self.pool(), agent.owner_id, agent.agent_id).await?;
         let code = code.trim().to_uppercase();
         let kid = self.resolve_key(agent, kid).await?;
         self.ensure_free(agent).await?;
@@ -1395,6 +1465,7 @@ impl App {
             .await
             .map_err(|err| CallError::new(500, "start_failed", err.to_string()))?;
         }
+        self.slot(match_id).notify.notify_waiters();
         Ok(json!({
             "match_id": match_id,
             "room_code": code,
@@ -1590,6 +1661,35 @@ impl App {
         }
     }
 
+    /// Validate the original decision and full action without touching liveness,
+    /// starting a room actor, signing a rejection, or persisting anything.
+    pub async fn validate_move(
+        &self,
+        agent: &AgentCtx,
+        match_id: Uuid,
+        args: &Value,
+    ) -> Result<Value, CallError> {
+        if let Some(tx) = self.inner.hub.sender(match_id) {
+            return roundtrip(&tx, |reply| Cmd::ValidateMove {
+                agent_id: agent.agent_id,
+                args: args.clone(),
+                reply,
+            })
+            .await;
+        }
+        Engine::read_validation(
+            self.pool().clone(),
+            self.server().clone(),
+            self.signing_origin(),
+            match_id,
+            agent.agent_id,
+            args,
+            self.config().max_match_duration_ms(),
+        )
+        .await
+        .map_err(|_| CallError::new(404, "not_found", "找不到这局"))
+    }
+
     pub async fn make_move(
         &self,
         agent: &AgentCtx,
@@ -1629,6 +1729,8 @@ impl App {
     }
 
     pub async fn join_queue(&self, agent: &AgentCtx, body: &Value) -> Result<Value, CallError> {
+        let guard = queue_lock().lock().await;
+        crate::cosmetics::owned(self.pool(), agent.owner_id, agent.agent_id).await?;
         if !agent.scopes.iter().any(|s| s == "play:ranked") {
             return Err(CallError::new(
                 403,
@@ -1691,6 +1793,7 @@ impl App {
         .execute(self.pool())
         .await
         .map_err(db_err)?;
+        drop(guard);
         self.matchmake_once()
             .await
             .map_err(|err| CallError::new(500, "matchmaker", err.to_string()))?;
@@ -1969,7 +2072,7 @@ impl App {
         .ok_or_else(|| CallError::new(404, "not_found", "没有这个用户"))?;
         let agents = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>, Option<String>, String, String, bool, Option<String>)>(
             r#"SELECT id, name, model_label, title, bio, color, avatar_preset, avatar_image, frame_id
-               FROM agents WHERE owner_id = $1 ORDER BY created_at"#,
+               FROM agents WHERE owner_id = $1 AND deleted_at IS NULL ORDER BY created_at"#,
         )
         .bind(user.0)
         .fetch_all(self.pool())
@@ -2218,6 +2321,7 @@ impl App {
                 .map_err(db_err)?;
             }
             tx.commit().await.map_err(db_err)?;
+            self.slot(match_id).notify.notify_waiters();
             return Ok(json!({
                 "accepted": true,
                 "status": if left == 0 { "closed" } else { "waiting" },

@@ -643,11 +643,12 @@ pub async fn update_profile(
     agent_id: Uuid,
     body: &Value,
 ) -> Result<Value, CallError> {
-    let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM agents WHERE id = $1")
-        .bind(agent_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(db_err)?;
+    let exists: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM agents WHERE id = $1 AND deleted_at IS NULL")
+            .bind(agent_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(db_err)?;
     if exists.is_none() {
         return Err(CallError::new(404, "not_found", "找不到这个智能体"));
     }
@@ -931,13 +932,14 @@ async fn bundle(pool: &PgPool, agent_id: Uuid) -> Result<Value, CallError> {
 }
 
 pub async fn owned(pool: &PgPool, user_id: Uuid, agent_id: Uuid) -> Result<(), CallError> {
-    let ok: Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM agents WHERE id = $1 AND owner_id = $2")
-            .bind(agent_id)
-            .bind(user_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(db_err)?;
+    let ok: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM agents WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(agent_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_err)?;
     if ok.is_none() {
         return Err(CallError::new(404, "not_found", "找不到这个智能体"));
     }
@@ -950,7 +952,7 @@ pub async fn fresh_for_user(pool: &PgPool, user_id: Uuid) -> Result<Value, CallE
            FROM agent_unlocks u
            JOIN cosmetic_items i ON i.id = u.item_id
            JOIN agents a ON a.id = u.agent_id
-           WHERE a.owner_id = $1 AND u.acked_at IS NULL
+           WHERE a.owner_id = $1 AND a.deleted_at IS NULL AND u.acked_at IS NULL
            ORDER BY u.unlocked_at"#,
     )
     .bind(user_id)
@@ -970,7 +972,7 @@ pub async fn ack_for_user(pool: &PgPool, user_id: Uuid) -> Result<Value, CallErr
     sqlx::query(
         r#"UPDATE agent_unlocks SET acked_at = now()
            WHERE acked_at IS NULL
-             AND agent_id IN (SELECT id FROM agents WHERE owner_id = $1)"#,
+             AND agent_id IN (SELECT id FROM agents WHERE owner_id = $1 AND deleted_at IS NULL)"#,
     )
     .bind(user_id)
     .execute(pool)
@@ -1057,11 +1059,12 @@ pub fn avatar_path(data_dir: &Path, agent_id: Uuid) -> PathBuf {
 }
 
 async fn owned_agent(pool: &PgPool, agent_id: Uuid) -> Result<(), CallError> {
-    let ok: Option<Uuid> = sqlx::query_scalar("SELECT id FROM agents WHERE id = $1")
-        .bind(agent_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(db_err)?;
+    let ok: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM agents WHERE id = $1 AND deleted_at IS NULL")
+            .bind(agent_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(db_err)?;
     if ok.is_none() {
         return Err(CallError::new(404, "not_found", "找不到这个智能体"));
     }
