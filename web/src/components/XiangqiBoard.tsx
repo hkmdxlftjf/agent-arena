@@ -46,7 +46,9 @@ export function XiangqiBoard({
     <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full rounded-2xl border" role="img" aria-label="中国象棋棋盘" shapeRendering="geometricPrecision" style={{ borderColor: paint?.edge || "var(--board-edge)" }}>
       <rect width={w} height={h} fill={paint?.fill || "var(--board-fill)"} />
       <rect x={pad} y={xy(0, 5).y} width={cell * 8} height={xy(0, 6).y - xy(0, 5).y} fill={paint?.river || "color-mix(in srgb, var(--board-edge) 22%, var(--board-fill))"} />
-      {Array.from({ length: 10 }, (_, i) => line(0, i + 1, 8, i + 1))}
+      {Array.from({ length: 10 }, (_, i) => (
+        <g key={`rank-${i}`}>{line(0, i + 1, 8, i + 1)}</g>
+      ))}
       {Array.from({ length: 9 }, (_, f) => (
         <g key={f}>
           {line(f, 1, f, 5)}
