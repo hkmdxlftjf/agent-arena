@@ -73,15 +73,42 @@ async fn run_case(pool: PgPool, scenario: &str) {
     .await
     .unwrap();
     let (black, black_home, token) = seat(&app, "local_black").await;
-    let (white, white_home, _) = seat(&app, "local_white").await;
-    let room = app
-        .create_room(&black, &json!({"game":"gomoku","variant":"free"}))
+    let (white, white_home, white_token) = seat(&app, "local_white").await;
+    let extra_home = if scenario == "admission" {
+        let primary: String = sqlx::query_scalar("SELECT kid FROM agent_keys WHERE agent_id = $1")
+            .bind(black.agent_id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+        let home = common::fresh_home("gateway-other-key");
+        common::keygen(&home);
+        let challenge = app.key_challenge(&black).await.unwrap();
+        let envelope = common::sign(&home, &challenge["signing_request"], None, None);
+        app.register_key(&black, &envelope, None).await.unwrap();
+        sqlx::query(
+            "UPDATE agent_keys SET created_at = CASE WHEN kid = $1 THEN to_timestamp(1) ELSE to_timestamp(2) END WHERE agent_id = $2",
+        )
+        .bind(primary)
+        .bind(black.agent_id)
+        .execute(app.pool())
         .await
         .unwrap();
-    let id = Uuid::parse_str(room["match_id"].as_str().unwrap()).unwrap();
-    app.join_room(&white, room["room_code"].as_str().unwrap(), None)
-        .await
-        .unwrap();
+        Some(home)
+    } else {
+        None
+    };
+    let match_id = if scenario == "admission" {
+        None
+    } else {
+        let room = app
+            .create_room(&black, &json!({"game":"gomoku","variant":"free"}))
+            .await
+            .unwrap();
+        app.join_room(&white, room["room_code"].as_str().unwrap(), None)
+            .await
+            .unwrap();
+        Some(Uuid::parse_str(room["match_id"].as_str().unwrap()).unwrap())
+    };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let drop_once = Arc::new(AtomicBool::new(scenario == "lost-response"));
@@ -101,7 +128,12 @@ async fn run_case(pool: PgPool, scenario: &str) {
         .env("ARENA_BASE_URL", format!("http://{address}"))
         .env("ARENA_SIGN_SCRIPT", common::sign_mjs())
         .env("ARENA_ALLOWED_ORIGINS", "agent.idou.bid")
-        .env("ARENA_TEST_MATCH", id.to_string())
+        .env(
+            "ARENA_TEST_MATCH",
+            match_id.map(|id| id.to_string()).unwrap_or_default(),
+        )
+        .env("ARENA_TEST_OPPONENT_TOKEN", white_token)
+        .env("ARENA_TEST_OPPONENT_HOME", &white_home)
         .kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(45), command.output())
         .await
@@ -115,6 +147,11 @@ async fn run_case(pool: PgPool, scenario: &str) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let finished: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = Uuid::parse_str(finished["match_id"].as_str().unwrap()).unwrap();
+    if let Some(expected) = match_id {
+        assert_eq!(id, expected);
+    }
     let state = app
         .get_state_query(&black, id, &json!({"history":"full"}))
         .await
@@ -134,6 +171,9 @@ async fn run_case(pool: PgPool, scenario: &str) {
     std::fs::remove_dir_all(dir).unwrap();
     std::fs::remove_dir_all(black_home).unwrap();
     std::fs::remove_dir_all(white_home).unwrap();
+    if let Some(home) = extra_home {
+        std::fs::remove_dir_all(home).unwrap();
+    }
 }
 
 #[sqlx::test]
@@ -149,4 +189,9 @@ async fn local_stdio_illegal_move_is_rejected_before_signing(pool: PgPool) {
 #[sqlx::test]
 async fn local_stdio_restart_recovers_a_lost_acceptance_response(pool: PgPool) {
     run_case(pool, "lost-response").await;
+}
+
+#[sqlx::test]
+async fn local_stdio_admission_uses_its_key_when_another_key_is_newer(pool: PgPool) {
+    run_case(pool, "admission").await;
 }

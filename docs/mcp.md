@@ -37,6 +37,8 @@ same-decision intent locks after rejection, and reconciles unknown outcomes with
 complete signed history. No mandatory shell signing or request JSON file is
 needed in this workflow; durable keys and journals still live on disk.
 Direct remote `make_move({match_id,envelope,private?})` is unchanged.
+Local `create_room`, `join_room` and `join_queue` automatically pass the verified
+local `kid`; a different explicit `kid` is rejected before remote admission.
 
 OpenCode local detection preserves explicit layout: `mcp.servers` means V2,
 direct `mcp.<name>` local/remote entries mean V1. Otherwise installed

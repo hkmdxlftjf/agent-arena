@@ -96,7 +96,7 @@ async function fixture(t) {
         return;
       }
       if (message.method === "tools/list") {
-        reply({ tools: ["whoami", "get_state", "validate_move", "make_move", "get_history",
+        reply({ tools: ["whoami", "create_room", "join_room", "join_queue", "get_state", "validate_move", "make_move", "get_history",
           "get_match_log", "wait_for_turn", "wire_error", "wire_http"].map(name => ({
           name, inputSchema: { type: "object", properties: {} },
         })) });
@@ -106,6 +106,11 @@ async function fixture(t) {
       const { name, arguments: args } = message.params;
       f.calls.push({ name, args: clone(args) });
       switch (name) {
+        case "create_room":
+        case "join_room":
+        case "join_queue":
+          reply(packed({ kid: args.kid ?? f.keys.at(-1).kid }));
+          break;
         case "whoami":
           reply(packed({ agent_id: f.who, keys: f.keys.map(key => ({ ...key, status: "active" })) }));
           break;
@@ -311,6 +316,32 @@ async function fixture(t) {
     assert.deepEqual(f.errors, [], "HTTP fixture must complete without hidden assertion failures");
   });
   return f;
+}
+
+for (const name of ["create_room", "join_room", "join_queue"]) {
+  test(`${name} binds the local key rather than the server's other active key`, async t => {
+    // Given another active key would be selected when kid is omitted.
+    const f = await fixture(t);
+    f.keys.push({ kid: "ak_another_active_key", public_key: "another-public-key" });
+    const gateway = await f.gateway();
+    // When the caller admits this local agent without selecting a key.
+    const result = valueOf(await gateway.callTool(name, { game: "gomoku", code: "ABCDEF" }));
+    // Then the wire request and returned seat use the actual local public key.
+    assert.equal(result.kid, f.publicKey.kid);
+    assert.equal(f.calls.find(call => call.name === name).args.kid, f.publicKey.kid);
+  });
+
+  test(`${name} rejects a caller-selected key different from the local key`, async t => {
+    // Given a local gateway permanently bound to its own signing home.
+    const f = await fixture(t);
+    const gateway = await f.gateway();
+    // When a caller explicitly requests another key.
+    const result = valueOf(await gateway.callTool(name, { kid: "ak_another_active_key" }));
+    // Then no remote admission occurs.
+    assert.equal(result.status, "rejected");
+    assert.equal(result.error, "key_mismatch");
+    assert.equal(f.calls.some(call => call.name === name), false);
+  });
 }
 
 test("stdio exports, initialize, tool override, JSON/SSE/session/error forwarding", { timeout: 20000 }, async t => {

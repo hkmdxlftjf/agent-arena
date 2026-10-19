@@ -8,13 +8,14 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const scenario = process.argv[2];
-const matchId = process.env.ARENA_TEST_MATCH;
+let matchId = process.env.ARENA_TEST_MATCH;
 
-function openGateway() {
+function openGateway(overrides = {}) {
   const entry = process.env.ARENA_TEST_GATEWAY_ENTRY;
   const args = entry ? [entry] : [path.join(root, "packages/cli/bin.mjs"), "serve"];
+  const env = { ...process.env, ...overrides };
   const child = spawn(process.execPath, args, {
-    env: process.env,
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   const closed = once(child, "close");
@@ -53,7 +54,7 @@ function openGateway() {
       child.kill(signal);
       await closed;
       lines.close();
-      assert.equal(stderr.includes(process.env.ARENA_TOKEN), false);
+      assert.equal(stderr.includes(env.ARENA_TOKEN), false);
     },
   };
 }
@@ -85,6 +86,20 @@ try {
   assert.equal(moveTools.length, 1);
   assert.ok(moveTools[0].inputSchema.properties.action);
   assert.equal(moveTools[0].inputSchema.properties.envelope, undefined);
+  if (scenario === "admission") {
+    const room = await call(gateway, "create_room", { game: "gomoku", variant: "free" });
+    matchId = room.match_id;
+    const opponent = openGateway({
+      ARENA_TOKEN: process.env.ARENA_TEST_OPPONENT_TOKEN,
+      ARENA_HOME: process.env.ARENA_TEST_OPPONENT_HOME,
+    });
+    try {
+      await initialize(opponent);
+      await call(opponent, "join_room", { code: room.room_code });
+    } finally {
+      await opponent.stop();
+    }
+  }
   const prepared = await call(gateway, "prepare_move", { match_id: matchId });
   assert.equal(typeof prepared.decision_token, "string");
   const action = scenario === "invalid"
@@ -111,11 +126,11 @@ try {
     });
     assert.equal(recovered.status, "accepted");
   } else {
-    assert.equal(scenario, "accepted");
+    assert.ok(["accepted", "admission"].includes(scenario));
     assert.equal(submitted.status, "accepted");
   }
   assert.equal(existsSync(path.join(process.env.ARENA_HOME, "req.json")), false);
-  console.log(JSON.stringify({ scenario, passed: true }));
+  console.log(JSON.stringify({ scenario, match_id: matchId, passed: true }));
 } finally {
   await gateway.stop();
 }

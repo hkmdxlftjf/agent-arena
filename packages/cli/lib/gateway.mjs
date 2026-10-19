@@ -305,7 +305,20 @@ export async function createGateway({ env = process.env, onNotification } = {}) 
     },
     async callTool(name, args = {}, meta) {
       if (!localNames.has(name)) {
-        return remote.call("tools/call", { name, arguments: args, ...(meta ? { _meta: meta } : {}) });
+        let forwarded = args;
+        if (["create_room", "join_room", "join_queue"].includes(name)) {
+          const bound = await identity();
+          if (args.kid !== undefined && args.kid !== bound.kid) {
+            const value = outcome("rejected", "key_mismatch");
+            return {
+              content: [{ type: "text", text: JSON.stringify(value) }],
+              structuredContent: value,
+              isError: true,
+            };
+          }
+          forwarded = { ...args, kid: bound.kid };
+        }
+        return remote.call("tools/call", { name, arguments: forwarded, ...(meta ? { _meta: meta } : {}) });
       }
       let value;
       try {
