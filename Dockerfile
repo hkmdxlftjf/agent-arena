@@ -7,7 +7,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM rust:1.99-bookworm AS rust
+FROM rust:1.100-bookworm AS rust
 WORKDIR /src
 # The image ships the newest 1.99.x, while rust-toolchain.toml pins an exact
 # release. Install that toolchain in its own layer: otherwise every build that
